@@ -231,21 +231,22 @@ impl Complexity {
         }
     }
 
-    fn visit_logical(&mut self, e: &Expr, parent_op: Option<&BinOp>) {
-        if let Expr::Binary(b) = e
-            && matches!(b.op, BinOp::And(_) | BinOp::Or(_))
-        {
-            let same_as_parent =
-                matches!((parent_op, &b.op), (Some(BinOp::And(_)), BinOp::And(_)) | (Some(BinOp::Or(_)), BinOp::Or(_)));
-            if !same_as_parent {
-                self.cognitive += 1;
-            }
-            self.cyclomatic += 1;
-            self.visit_logical(&b.left, Some(&b.op));
-            self.visit_logical(&b.right, Some(&b.op));
-            return;
+    /// Counts a `&&`/`||` expression: +1 per sequence of like operators.
+    fn visit_logical(&mut self, b: &syn::ExprBinary, parent_op: Option<&BinOp>) {
+        let same_as_parent =
+            matches!((parent_op, &b.op), (Some(BinOp::And(_)), BinOp::And(_)) | (Some(BinOp::Or(_)), BinOp::Or(_)));
+        if !same_as_parent {
+            self.cognitive += 1;
         }
-        self.visit_expr(e);
+        self.cyclomatic += 1;
+        for side in [&*b.left, &*b.right] {
+            match side {
+                Expr::Binary(inner) if matches!(inner.op, BinOp::And(_) | BinOp::Or(_)) => {
+                    self.visit_logical(inner, Some(&b.op))
+                }
+                other => self.visit_expr(other),
+            }
+        }
     }
 }
 
@@ -328,9 +329,7 @@ impl<'ast> Visit<'ast> for Complexity {
 
     fn visit_expr_binary(&mut self, b: &'ast syn::ExprBinary) {
         if matches!(b.op, BinOp::And(_) | BinOp::Or(_)) {
-            // Re-enter through the logical-sequence counter.
-            let e = Expr::Binary(b.clone());
-            self.visit_logical(&e, None);
+            self.visit_logical(b, None);
         } else {
             visit::visit_expr_binary(self, b);
         }

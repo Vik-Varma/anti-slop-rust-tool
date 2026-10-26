@@ -43,14 +43,21 @@ pub fn mod_decls(src: &str) -> Vec<ModDecl> {
     let mut out = Vec::new();
     let mut cfg_test = false;
     let mut path_attr: Option<String> = None;
-    for line in src.lines().map(str::trim) {
-        if line.starts_with("#[") {
-            if line.starts_with("#[cfg(") && line.contains("test") && !line.contains("not(") {
+    for raw in src.lines().map(str::trim) {
+        // Attributes may precede the declaration on the same line: `#[cfg(test)] mod tests;`.
+        let mut line = raw;
+        while line.starts_with("#[") {
+            let end = attr_end(line);
+            let attr = &line[..end];
+            if attr.starts_with("#[cfg(") && contains_word(attr, "test") && !attr.contains("not(") {
                 cfg_test = true;
             }
-            if let Some(rest) = line.strip_prefix("#[path") {
+            if let Some(rest) = attr.strip_prefix("#[path") {
                 path_attr = rest.split('"').nth(1).map(str::to_string);
             }
+            line = line[end..].trim_start();
+        }
+        if line.is_empty() && raw.starts_with("#[") {
             continue;
         }
         if line.is_empty() || line.starts_with("//") {
@@ -70,6 +77,44 @@ pub fn mod_decls(src: &str) -> Vec<ModDecl> {
         path_attr = None;
     }
     out
+}
+
+/// Byte index just past the attribute starting at `line[0]` (or the line end).
+fn attr_end(line: &str) -> usize {
+    let mut depth = 0;
+    for (i, c) in line.char_indices() {
+        match c {
+            '[' => depth += 1,
+            ']' => {
+                depth -= 1;
+                if depth == 0 {
+                    return i + 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    line.len()
+}
+
+/// `word` appears as an identifier (not inside a longer name or string).
+fn contains_word(text: &str, word: &str) -> bool {
+    let mut in_str = false;
+    let mut cur = String::new();
+    for c in text.chars().chain(std::iter::once(' ')) {
+        if c == '"' {
+            in_str = !in_str;
+            cur.clear();
+        } else if !in_str && (c.is_alphanumeric() || c == '_') {
+            cur.push(c);
+        } else {
+            if cur == word {
+                return true;
+            }
+            cur.clear();
+        }
+    }
+    false
 }
 
 fn child_files(file: &Path, decl: &ModDecl) -> Vec<PathBuf> {
@@ -194,10 +239,13 @@ mod tests {
 
     #[test]
     fn parses_mod_decls() {
-        let src = "mod a;\n#[cfg(test)]\nmod tests;\n#[cfg(test)]\n#[path = \"x.rs\"]\npub(crate) mod unit;\n#[cfg(not(test))]\nmod real;\nmod inline { }\n";
+        let src = "mod a;\n#[cfg(test)]\nmod tests;\n#[cfg(test)]\n#[path = \"x.rs\"]\npub(crate) mod unit;\n#[cfg(not(test))]\nmod real;\nmod inline { }\n#[cfg(test)] mod one_line;\n#[cfg(feature = \"test-utils\")]\nmod utils;\n";
         let d = mod_decls(src);
         let names: Vec<(&str, bool)> = d.iter().map(|m| (m.name.as_str(), m.cfg_test)).collect();
-        assert_eq!(names, vec![("a", false), ("tests", true), ("unit", true), ("real", false)]);
+        assert_eq!(
+            names,
+            vec![("a", false), ("tests", true), ("unit", true), ("real", false), ("one_line", true), ("utils", false)]
+        );
         assert_eq!(d[2].path_attr.as_deref(), Some("x.rs"));
     }
 

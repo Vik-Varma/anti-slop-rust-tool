@@ -111,40 +111,64 @@ fn is_reentrant(receiver: &Expr) -> bool {
 /// blocks), returning (receiver key, span). Lock calls that are awaited are
 /// returned too when `include_awaited` is set.
 fn lock_calls(e: &Expr, include_awaited: bool) -> Vec<(String, proc_macro2::Span)> {
-    struct F {
-        out: Vec<(String, proc_macro2::Span)>,
-        include_awaited: bool,
-        awaited: Vec<*const syn::ExprMethodCall>,
+    collect_locks(include_awaited, |f| f.visit_expr(e))
+}
+
+fn lock_calls_in_block(b: &Block) -> Vec<(String, proc_macro2::Span)> {
+    collect_locks(true, |f| f.visit_block(b))
+}
+
+/// Scrutinees of `if let` / `while let` conditions, including let-chains
+/// (`if let Some(x) = a && let Ok(y) = b`).
+fn let_scrutinees(cond: &Expr) -> Vec<&Expr> {
+    match peel(cond) {
+        Expr::Let(l) => vec![&*l.expr],
+        Expr::Binary(b) if matches!(b.op, syn::BinOp::And(_)) => {
+            let mut v = let_scrutinees(&b.left);
+            v.extend(let_scrutinees(&b.right));
+            v
+        }
+        _ => Vec::new(),
     }
-    impl<'ast> Visit<'ast> for F {
-        fn visit_expr_await(&mut self, a: &'ast syn::ExprAwait) {
-            if let Expr::MethodCall(m) = peel(&a.base) {
-                self.awaited.push(m as *const _);
-            }
-            visit::visit_expr_await(self, a);
-        }
-        fn visit_expr_method_call(&mut self, m: &'ast syn::ExprMethodCall) {
-            let is_lock = m.args.is_empty() && LOCK_METHODS.iter().any(|n| m.method == n) && !is_reentrant(&m.receiver);
-            let awaited = self.awaited.contains(&(m as *const _));
-            if is_lock && (self.include_awaited || !awaited) {
-                self.out.push((expr_key(&m.receiver), m.method.span()));
-            }
-            visit::visit_expr_method_call(self, m);
-        }
-        fn visit_expr_closure(&mut self, _: &'ast syn::ExprClosure) {}
-        fn visit_expr_async(&mut self, _: &'ast syn::ExprAsync) {}
-        fn visit_item(&mut self, _: &'ast syn::Item) {}
-        fn visit_macro(&mut self, mac: &'ast syn::Macro) {
-            if let Some(exprs) = macro_exprs(mac) {
-                for e in &exprs {
-                    self.visit_expr(e);
-                }
-            }
-        }
-    }
-    let mut f = F { out: Vec::new(), include_awaited, awaited: Vec::new() };
-    f.visit_expr(e);
+}
+
+struct LockCollector {
+    out: Vec<(String, proc_macro2::Span)>,
+    include_awaited: bool,
+    awaited: Vec<*const syn::ExprMethodCall>,
+}
+
+fn collect_locks(include_awaited: bool, run: impl FnOnce(&mut LockCollector)) -> Vec<(String, proc_macro2::Span)> {
+    let mut f = LockCollector { out: Vec::new(), include_awaited, awaited: Vec::new() };
+    run(&mut f);
     f.out
+}
+
+impl<'ast> Visit<'ast> for LockCollector {
+    fn visit_expr_await(&mut self, a: &'ast syn::ExprAwait) {
+        if let Expr::MethodCall(m) = peel(&a.base) {
+            self.awaited.push(m as *const _);
+        }
+        visit::visit_expr_await(self, a);
+    }
+    fn visit_expr_method_call(&mut self, m: &'ast syn::ExprMethodCall) {
+        let is_lock = m.args.is_empty() && LOCK_METHODS.iter().any(|n| m.method == n) && !is_reentrant(&m.receiver);
+        let awaited = self.awaited.contains(&(m as *const _));
+        if is_lock && (self.include_awaited || !awaited) {
+            self.out.push((expr_key(&m.receiver), m.method.span()));
+        }
+        visit::visit_expr_method_call(self, m);
+    }
+    fn visit_expr_closure(&mut self, _: &'ast syn::ExprClosure) {}
+    fn visit_expr_async(&mut self, _: &'ast syn::ExprAsync) {}
+    fn visit_item(&mut self, _: &'ast syn::Item) {}
+    fn visit_macro(&mut self, mac: &'ast syn::Macro) {
+        if let Some(exprs) = macro_exprs(mac) {
+            for e in &exprs {
+                self.visit_expr(e);
+            }
+        }
+    }
 }
 
 /// First `.await` in a node (not inside closures, async blocks or items).
@@ -319,10 +343,10 @@ impl<'ast> Visit<'ast> for AcrossAwait<'_, '_, '_> {
         visit::visit_expr_match(self, m);
     }
     fn visit_expr_if(&mut self, i: &'ast syn::ExprIf) {
-        if self.in_async
-            && let Expr::Let(l) = &*i.cond
-        {
-            self.check_scrutinee(&l.expr, &|f: &mut AwaitFinder| f.visit_block(&i.then_branch));
+        if self.in_async {
+            for scrutinee in let_scrutinees(&i.cond) {
+                self.check_scrutinee(scrutinee, &|f: &mut AwaitFinder| f.visit_block(&i.then_branch));
+            }
         }
         visit::visit_expr_if(self, i);
     }
@@ -351,12 +375,17 @@ struct Scrutinee<'s, 'c, 'a> {
 
 impl Scrutinee<'_, '_, '_> {
     fn check(&mut self, scrutinee: &Expr, bodies: &[&Expr]) {
+        let in_bodies: Vec<_> = bodies.iter().flat_map(|b| lock_calls(b, true)).collect();
+        self.report(scrutinee, in_bodies);
+    }
+
+    fn report(&mut self, scrutinee: &Expr, in_bodies: Vec<(String, proc_macro2::Span)>) {
         let held = lock_calls(scrutinee, true);
         if held.is_empty() {
             return;
         }
-        for body in bodies {
-            for (key, span) in lock_calls(body, true) {
+        {
+            for (key, span) in in_bodies {
                 if let Some((_, first)) = held.iter().find(|(k, _)| *k == key)
                     && self.ctx.is_production_line(span.start().line)
                 {
@@ -384,16 +413,14 @@ impl<'ast> Visit<'ast> for Scrutinee<'_, '_, '_> {
         visit::visit_expr_match(self, m);
     }
     fn visit_expr_if(&mut self, i: &'ast syn::ExprIf) {
-        if let Expr::Let(l) = &*i.cond {
-            let then = Expr::Block(syn::ExprBlock { attrs: vec![], label: None, block: i.then_branch.clone() });
-            self.check(&l.expr, &[&then]);
+        for scrutinee in let_scrutinees(&i.cond) {
+            self.report(scrutinee, lock_calls_in_block(&i.then_branch));
         }
         visit::visit_expr_if(self, i);
     }
     fn visit_expr_while(&mut self, w: &'ast syn::ExprWhile) {
-        if let Expr::Let(l) = &*w.cond {
-            let body = Expr::Block(syn::ExprBlock { attrs: vec![], label: None, block: w.body.clone() });
-            self.check(&l.expr, &[&body]);
+        for scrutinee in let_scrutinees(&w.cond) {
+            self.report(scrutinee, lock_calls_in_block(&w.body));
         }
         visit::visit_expr_while(self, w);
     }
@@ -435,7 +462,7 @@ const STD_FS_FNS: &[&str] = &[
     "symlink_metadata",
 ];
 const BLOCKING_METHODS: &[&str] =
-    &["blocking_lock", "blocking_recv", "blocking_send", "blocking_read", "blocking_write", "block_on"];
+    &["blocking_lock", "blocking_recv", "blocking_send", "blocking_read", "blocking_write"];
 const OFFLOAD_FNS: &[&str] = &["spawn_blocking", "block_in_place", "spawn", "scope"];
 
 struct Blocking<'s, 'c, 'a> {
@@ -529,8 +556,7 @@ impl<'ast> Visit<'ast> for Blocking<'_, '_, '_> {
             // calling thread, so its body is not running inside another task's executor slot.
             self.visit_expr(&m.receiver);
             let prev = self.in_async;
-            let was_async = self.in_async;
-            if was_async {
+            if prev {
                 self.report(
                     m.method.span(),
                     ".block_on()",
@@ -549,11 +575,7 @@ impl<'ast> Visit<'ast> for Blocking<'_, '_, '_> {
             return;
         }
         if BLOCKING_METHODS.iter().any(|n| m.method == n) {
-            let instead = if m.method == "block_on" {
-                "`.await` the future instead (this panics inside a runtime)"
-            } else {
-                "use the async version with `.await` (this panics inside a runtime)"
-            };
+            let instead = "use the async version with `.await` (this panics inside a runtime)";
             self.report(m.method.span(), &format!(".{}()", m.method), instead);
         }
         if OFFLOAD_FNS.iter().any(|n| m.method == n) {
@@ -645,6 +667,9 @@ fn bad(m: &std::sync::Mutex<Vec<u32>>) {
     if let Some(x) = self.map.read().unwrap().get(&1) {
         self.map.write().unwrap().insert(2, *x);
     }
+    if let Some(x) = m.lock().unwrap().first() && ready {
+        m.lock().unwrap().clear();
+    }
 }
 fn ok(m: &std::sync::Mutex<Vec<u32>>, n: &std::sync::Mutex<u32>) {
     let first = m.lock().unwrap().first().copied();
@@ -654,7 +679,7 @@ fn ok(m: &std::sync::Mutex<Vec<u32>>, n: &std::sync::Mutex<u32>) {
     if m.lock().unwrap().is_empty() { m.lock().unwrap().push(1); }
 }
 "#;
-        assert_eq!(lines(&check_rule("lock-in-scrutinee", src)), vec![4, 8]);
+        assert_eq!(lines(&check_rule("lock-in-scrutinee", src)), vec![4, 8, 11]);
     }
 
     #[test]

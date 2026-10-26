@@ -1,7 +1,7 @@
 //! Panicking code paths in production code.
 
 use super::{Input, Rule, RuleMeta, Sink};
-use crate::ast_util::{macro_exprs, macro_name, path_string, peel};
+use crate::ast_util::{macro_exprs, macro_name, peel};
 use crate::context::{FileContext, FileKind};
 use crate::finding::{Category, Evidence, Severity};
 use syn::spanned::Spanned;
@@ -134,17 +134,21 @@ fn is_exempt_unwrap_receiver(recv: &Expr) -> bool {
             if m.args.is_empty() && matches!(name.as_str(), "lock" | "read" | "write" | "join") {
                 return true;
             }
-            all_literal_args(m.args.iter()) && !m.args.is_empty() && is_literalish(&m.receiver)
-                || (m.args.is_empty() && matches!(peel(&m.receiver), Expr::Lit(_)))
+            // `"127.0.0.1".parse()`: parsing a literal cannot fail at run time.
+            matches!(peel(&m.receiver), Expr::Lit(_)) && all_literal_args(m.args.iter())
         }
-        Expr::Call(c) => !c.args.is_empty() && all_literal_args(c.args.iter()),
+        // `Regex::new("..")`, `NonZeroU32::new(5)`: constructing from literals.
+        Expr::Call(c) => {
+            let ctor = matches!(&*c.func, Expr::Path(p)
+                if p.path.segments.len() >= 2
+                    && p.path.segments.last().is_some_and(|s| CONSTRUCTORS.iter().any(|n| s.ident == n)));
+            ctor && !c.args.is_empty() && all_literal_args(c.args.iter())
+        }
         _ => false,
     }
 }
 
-fn is_literalish(e: &Expr) -> bool {
-    matches!(peel(e), Expr::Lit(_) | Expr::Path(_))
-}
+const CONSTRUCTORS: &[&str] = &["new", "from_str", "parse", "try_from", "from"];
 
 fn all_literal_args<'a>(mut args: impl Iterator<Item = &'a Expr>) -> bool {
     args.all(|a| matches!(peel(a), Expr::Lit(_)))
@@ -401,6 +405,7 @@ impl Rule for ExitInLibrary {
         struct Finder<'s, 'c, 'a> {
             sink: &'s mut Sink<'c, 'a>,
             ctx: &'c FileContext<'a>,
+            imports: crate::ast_util::Imports,
             in_main: bool,
         }
         impl<'ast> Visit<'ast> for Finder<'_, '_, '_> {
@@ -412,7 +417,7 @@ impl Rule for ExitInLibrary {
             }
             fn visit_expr_call(&mut self, c: &'ast syn::ExprCall) {
                 if let Expr::Path(p) = &*c.func {
-                    let path = path_string(&p.path);
+                    let path = self.imports.resolve(&p.path).join("::");
                     if (path == "process::exit" || path.ends_with("::process::exit"))
                         && !self.in_main
                         && self.ctx.is_production_line(p.span().start().line)
@@ -431,7 +436,8 @@ impl Rule for ExitInLibrary {
                 }
             }
         }
-        Finder { ctx: sink.ctx(), sink, in_main: false }.visit_file(&input.ctx.ast);
+        let imports = crate::ast_util::Imports::collect(&input.ctx.ast);
+        Finder { ctx: sink.ctx(), sink, imports, in_main: false }.visit_file(&input.ctx.ast);
     }
 }
 
@@ -463,8 +469,14 @@ fn c(m: &std::sync::Mutex<u32>) -> Option<u32> {
 }
 fn d(x: Option<u32>) -> Option<u32> { let y = x.expect("checked"); Some(y) }
 fn e(x: Option<u32>) -> io::Result<u32> { Ok(x.unwrap()) }
+fn f() -> io::Result<String> {
+    let s = std::fs::read_to_string("config.toml").unwrap();
+    let v = map.get("key").unwrap();
+    let r = Regex::new("a+").unwrap();
+    Ok(s)
+}
 "#;
-        assert_eq!(lines(&check_rule("unwrap-in-result-fn", src)), vec![3, 14]);
+        assert_eq!(lines(&check_rule("unwrap-in-result-fn", src)), vec![3, 14, 16, 17]);
     }
 
     #[test]
@@ -491,8 +503,8 @@ impl Drop for B { fn drop(&mut self) { if !std::thread::panicking() { assert!(tr
 
     #[test]
     fn exit_in_library() {
-        let src = "fn fail() { std::process::exit(1) }\nfn main() { std::process::exit(0) }\n";
-        assert_eq!(lines(&check_rule("exit-in-library", src)), vec![1]);
+        let src = "use std::process::exit as quit;\nfn fail() { std::process::exit(1) }\nfn main() { std::process::exit(0) }\nfn other() { quit(2) }\n";
+        assert_eq!(lines(&check_rule("exit-in-library", src)), vec![2, 4]);
         assert!(check_rule_at("exit-in-library", "src/main.rs", src).is_empty());
     }
 }

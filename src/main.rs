@@ -40,7 +40,8 @@ enum Command {
         /// Hide findings below this severity.
         #[arg(long, default_value = "info")]
         min_severity: Severity,
-        /// Exit with status 1 if any finding at or above this severity is reported.
+        /// Exit with status 1 if any finding at or above this severity is reported,
+        /// or if a file could not be parsed.
         #[arg(long)]
         fail_on: Option<Severity>,
     },
@@ -87,6 +88,11 @@ fn main() -> ExitCode {
             let files = analyze::discover(&roots);
             let all = rules::all_rules();
             let mut reports = analyze::analyze_files(&files, &roots, &cfg, &all);
+            // Decide failure before display filtering; a file that could not be parsed
+            // was not checked, which also counts as a failure.
+            let failed = fail_on.is_some_and(|level| {
+                reports.iter().any(|r| r.parse_error.is_some() || r.findings.iter().any(|f| f.severity >= level))
+            });
             for r in &mut reports {
                 r.findings.retain(|f| f.severity >= min_severity);
             }
@@ -94,8 +100,6 @@ fn main() -> ExitCode {
                 Format::Text => print_text(&reports),
                 Format::Json => print_json(&reports),
             }
-            let failed =
-                fail_on.is_some_and(|level| reports.iter().flat_map(|r| &r.findings).any(|f| f.severity >= level));
             if failed { ExitCode::from(1) } else { ExitCode::SUCCESS }
         }
         Command::Metrics { paths } => {

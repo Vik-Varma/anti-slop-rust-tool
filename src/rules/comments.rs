@@ -270,19 +270,26 @@ impl Rule for CommentedOutCode {
             // illustration, not dead code.
             let mut illustrative = vec![false; block.len()];
             let mut in_fence = false;
+            let mut after_colon = false;
             for (k, c) in block.iter().enumerate() {
                 let t = c.text.trim();
                 if t.starts_with("```") {
                     in_fence = !in_fence;
                     illustrative[k] = true;
+                } else if t.is_empty() {
+                    // A blank comment line ends an example introduced by "...:".
+                    after_colon = false;
                 } else {
-                    illustrative[k] = in_fence;
+                    illustrative[k] = in_fence || after_colon;
+                }
+                if t.ends_with(':') {
+                    after_colon = true;
                 }
             }
             // Comment blocks often mix prose with code: find maximal runs that parse.
             let mut i = 0;
             while i < block.len() {
-                if illustrative[i] || (i > 0 && block[i - 1].text.trim_end().ends_with(':')) {
+                if illustrative[i] {
                     i += 1;
                     continue;
                 }
@@ -506,6 +513,7 @@ fn a(x: u32) -> u32 {
 // fn old() {}
 // Example:
 // let z = 1;
+// let z2 = 2;
 // ```
 // let w = 2;
 // ```

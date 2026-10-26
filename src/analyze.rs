@@ -39,23 +39,6 @@ pub fn discover(paths: &[PathBuf]) -> Vec<PathBuf> {
     files
 }
 
-/// The path relative to the enclosing crate root (the nearest directory with a
-/// `Cargo.toml`), so that `tests/`, `benches/` etc. are recognised regardless
-/// of where the crate lives on disk.
-pub fn crate_relative(path: &Path) -> PathBuf {
-    let abs = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    let mut dir = abs.parent();
-    while let Some(d) = dir {
-        if d.join("Cargo.toml").is_file()
-            && let Ok(rel) = abs.strip_prefix(d)
-        {
-            return rel.to_path_buf();
-        }
-        dir = d.parent();
-    }
-    path.to_path_buf()
-}
-
 pub fn analyze_source(
     path: &Path,
     kind: FileKind,

@@ -116,7 +116,9 @@ impl<'ast> Visit<'ast> for UnsafeFinder<'_, '_, '_> {
     fn visit_expr_unsafe(&mut self, u: &'ast syn::ExprUnsafe) {
         let line = u.unsafe_token.span.start().line;
         let mut candidates = vec![line];
-        candidates.extend(self.stmt_lines.iter().copied());
+        // Only the innermost enclosing statement: a comment above an outer loop
+        // does not document every unsafe block inside it.
+        candidates.extend(self.stmt_lines.last().copied());
         let open = u.block.brace_token.span.open().start().line;
         let multiline = u.block.brace_token.span.close().start().line > open;
         let first_inside = if multiline { Some(open) } else { None };
@@ -306,8 +308,21 @@ impl Rule for UninitMemory {
             sink: &'s mut Sink<'c, 'a>,
         }
         impl<'ast> Visit<'ast> for V<'_, '_, '_> {
+            fn visit_local(&mut self, l: &'ast syn::Local) {
+                // `let a: [MaybeUninit<T>; N] = MaybeUninit::uninit().assume_init();` is the
+                // documented sound idiom: the elements are themselves `MaybeUninit`.
+                let ty = match &l.pat {
+                    syn::Pat::Type(pt) => pt.ty.to_token_stream().to_string(),
+                    _ => String::new(),
+                };
+                if ty.contains("MaybeUninit <") {
+                    return;
+                }
+                visit::visit_local(self, l);
+            }
             fn visit_expr_method_call(&mut self, m: &'ast syn::ExprMethodCall) {
                 if m.method == "assume_init"
+                    && !m.receiver.to_token_stream().to_string().contains("MaybeUninit < [MaybeUninit")
                     && self.sink.ctx().is_production_line(m.method.span().start().line)
                     && let Expr::Call(c) = &*m.receiver
                     && let Expr::Path(p) = &*c.func
@@ -450,6 +465,12 @@ fn c(p: *const u8) -> u8 {
     );
     x
 }
+fn e(ps: &[*const u8]) {
+    // SAFETY: only the first pointer is valid
+    for p in ps {
+        let _v = unsafe { **p };
+    }
+}
 fn d(p: *const u8) -> u8 {
     unsafe {
         // SAFETY: valid
@@ -461,7 +482,7 @@ unsafe impl Send for S {}
 // Safety: S has no interior pointers.
 unsafe impl Sync for S {}
 "#;
-        assert_eq!(lines(&check_rule("undocumented-unsafe", src)), vec![3, 23]);
+        assert_eq!(lines(&check_rule("undocumented-unsafe", src)), vec![3, 19, 29]);
     }
 
     #[test]
@@ -486,9 +507,10 @@ unsafe impl<T: Clone> Send for L<T> {}
     #[test]
     fn uninit_memory() {
         let src = "fn a() -> u32 { unsafe { std::mem::MaybeUninit::uninit().assume_init() } }\n\
+                   fn arr() { let a: [MaybeUninit<u8>; 4] = unsafe { MaybeUninit::uninit().assume_init() }; }\n\
                    fn b() -> u32 { unsafe { std::mem::uninitialized() } }\n\
                    fn c() -> std::mem::MaybeUninit<u32> { std::mem::MaybeUninit::uninit() }\n";
-        assert_eq!(lines(&check_rule("uninit-memory", src)), vec![1, 2]);
+        assert_eq!(lines(&check_rule("uninit-memory", src)), vec![1, 3]);
     }
 
     #[test]

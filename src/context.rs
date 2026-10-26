@@ -191,10 +191,34 @@ pub fn is_test_attr(attr: &syn::Attribute) -> bool {
         return true;
     }
     if path.is_ident("cfg") {
-        let tokens = attr.meta.require_list().map(|l| l.tokens.to_string()).unwrap_or_default();
-        // `cfg(test)` or `cfg(any(test, ...))`, but not `cfg(not(test))`.
-        return tokens.split(|c: char| !c.is_alphanumeric() && c != '_').any(|t| t == "test")
-            && !tokens.contains("not");
+        // `cfg(test)`, `cfg(all(test, ..))` or `cfg(any(test, ..))`, but not `cfg(not(test))`
+        // and not `cfg(feature = "test-utils")`.
+        return attr.meta.require_list().is_ok_and(|l| cfg_mentions_test(l.tokens.clone(), false));
+    }
+    false
+}
+
+/// Does a cfg predicate mention the bare `test` flag outside a `not(..)`?
+fn cfg_mentions_test(tokens: proc_macro2::TokenStream, negated: bool) -> bool {
+    use proc_macro2::TokenTree;
+    let mut prev_ident: Option<String> = None;
+    for tt in tokens {
+        match tt {
+            TokenTree::Ident(i) => {
+                if i == "test" && !negated {
+                    return true;
+                }
+                prev_ident = Some(i.to_string());
+            }
+            TokenTree::Group(g) => {
+                let inner_negated = negated || prev_ident.as_deref() == Some("not");
+                if cfg_mentions_test(g.stream(), inner_negated) {
+                    return true;
+                }
+                prev_ident = None;
+            }
+            _ => prev_ident = None,
+        }
     }
     false
 }
@@ -270,12 +294,14 @@ mod tests {
 
     #[test]
     fn test_ranges() {
-        let src = "fn prod() {}\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn t() {}\n}\n#[cfg(not(test))]\nfn other() {}\n";
+        let src = "fn prod() {}\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn t() {}\n}\n#[cfg(not(test))]\nfn other() {}\n#[cfg(feature = \"test-utils\")]\nfn helper() {}\n#[cfg(all(test, feature = \"notify\"))]\nfn t2() {}\n";
         let c = ctx(src);
         assert!(!c.in_test(1));
         assert!(c.in_test(2));
         assert!(c.in_test(5));
         assert!(!c.in_test(8));
+        assert!(!c.in_test(10), "feature named test-utils is not test code");
+        assert!(c.in_test(12));
     }
 
     #[test]

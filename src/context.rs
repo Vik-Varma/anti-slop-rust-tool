@@ -25,7 +25,8 @@ impl FileKind {
         if file_name == "build.rs" {
             return FileKind::BuildScript;
         }
-        if dirs.iter().any(|d| d == "tests") {
+        // Test fixtures and fuzz targets are not production code either.
+        if dirs.iter().any(|d| matches!(d.as_str(), "tests" | "test_data" | "testdata" | "fixtures" | "fuzz")) {
             return FileKind::Test;
         }
         if dirs.iter().any(|d| d == "benches") {

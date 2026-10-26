@@ -101,7 +101,7 @@ static EAGER: RuleMeta = RuleMeta {
 fallback is not used, so an allocation is paid on every call, including the common success \
 path. The `_else` variants take a closure and only allocate when needed. The Perf Book: 'err is \
 computed eagerly. If its computation is expensive, you should instead use Option::ok_or_else'. \
-Only allocating arguments are flagged (`String::new()`/`Vec::new()` are free). Measured: about 12 ns of wasted allocation per call on the success path.",
+Only allocating arguments are flagged (`String::new()`, `Vec::new()` and `\"\".to_string()` are free). Measured: about 12 ns of wasted allocation per call on the success path.",
     sources: &[
         "The Rust Performance Book, 'Standard Library Types': https://nnethercote.github.io/perf-book/standard-library-types.html",
         "validation/benches/benches/patterns.rs::eager_fallback (this repository)",
@@ -308,6 +308,11 @@ impl Rule for RedundantBox {
     }
 }
 
+/// Is this the empty string literal `""`? An empty `String` does not allocate.
+fn is_empty_str_lit(e: &Expr) -> bool {
+    matches!(peel(e), Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(s), .. }) if s.value().is_empty())
+}
+
 /// Does evaluating `e` allocate (as far as we can tell syntactically)?
 fn allocates(e: &Expr) -> Option<&'static str> {
     match peel(e) {
@@ -316,14 +321,20 @@ fn allocates(e: &Expr) -> Option<&'static str> {
             "vec" if !m.mac.tokens.is_empty() => Some("vec![..]"),
             _ => None,
         },
-        Expr::MethodCall(m) if m.args.is_empty() => match m.method.to_string().as_str() {
-            "to_string" => Some(".to_string()"),
-            "to_owned" => Some(".to_owned()"),
-            "to_vec" => Some(".to_vec()"),
-            _ => None,
-        },
+        Expr::MethodCall(m) if m.args.is_empty() && !is_empty_str_lit(&m.receiver) => {
+            match m.method.to_string().as_str() {
+                "to_string" => Some(".to_string()"),
+                "to_owned" => Some(".to_owned()"),
+                "to_vec" => Some(".to_vec()"),
+                _ => None,
+            }
+        }
         Expr::Call(c) => match &*c.func {
-            Expr::Path(p) if path_string(&p.path).ends_with("String::from") => Some("String::from"),
+            Expr::Path(p)
+                if path_string(&p.path).ends_with("String::from") && !c.args.first().is_some_and(is_empty_str_lit) =>
+            {
+                Some("String::from")
+            }
             _ => None,
         },
         _ => None,
@@ -411,6 +422,8 @@ fn a(o: Option<String>, r: Option<u8>, id: u32) {
     let z = o.clone().unwrap_or(String::new());
     let w = o.unwrap_or_else(|| format!("{id}"));
     let v = r.map_or(vec![1, 2], |x| vec![x]);
+    let e = o.clone().unwrap_or("".to_string());
+    let f = o.clone().unwrap_or(String::from(""));
 }
 "#;
         assert_eq!(lines(&check_rule("eager-fallback-alloc", src)), vec![3, 4, 7]);

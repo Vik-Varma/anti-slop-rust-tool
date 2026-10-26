@@ -96,7 +96,6 @@ const PLACEHOLDER_PATTERNS: &[&[&str]] = &[
     &["^", "rest", "of", "the", "implementation"],
     &["^", "rest", "of", "implementation"],
     &["^", "implementation", "goes", "here"],
-    &["^", "implementation", "here"],
     &["^", "add", "implementation"],
     &["existing", "code", "..."],
     &["existing", "code", "here"],

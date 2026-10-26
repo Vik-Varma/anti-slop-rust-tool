@@ -176,7 +176,9 @@ impl Layout {
         }
         // Crates that exist to support tests (`foo-test-support`, `test-utils`, ...).
         let crate_name = root.as_ref().and_then(|r| r.file_name()).map(|n| n.to_string_lossy().to_ascii_lowercase());
-        if crate_name.is_some_and(|n| n.split(['-', '_']).any(|w| w == "test" || w == "tests" || w == "testing")) {
+        if crate_name.is_some_and(|n| {
+            n.split(['-', '_']).any(|w| matches!(w, "test" | "tests" | "testing" | "fuzz" | "fuzzing"))
+        }) {
             return FileKind::Test;
         }
         if self.bin_files.contains(&abs) && !self.lib_files.contains(&abs) {

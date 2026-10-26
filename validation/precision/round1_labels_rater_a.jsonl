@@ -1,0 +1,155 @@
+{"item": 1, "rule": "blocking-in-async", "label": "TP", "reason": "std::fs call directly inside an async fn running on the tokio runtime."}
+{"item": 2, "rule": "blocking-in-async", "label": "TP", "reason": "std::fs::File::create inside async fn run."}
+{"item": 3, "rule": "blocking-in-async", "label": "FP", "reason": "Async block is a trivial wrapper passed to runtime.block_on from sync code; no executor worker is stalled."}
+{"item": 4, "rule": "blocking-in-async", "label": "TP", "reason": "std::fs call directly inside an async fn running on the tokio runtime."}
+{"item": 5, "rule": "blocking-in-async", "label": "TP", "reason": "std::fs call directly inside an async fn running on the tokio runtime."}
+{"item": 6, "rule": "blocking-in-async", "label": "FP", "reason": "Async block is a trivial wrapper passed to runtime.block_on from sync code; no executor worker is stalled."}
+{"item": 7, "rule": "blocking-in-async", "label": "TP", "reason": "std::fs call directly inside an async fn running on the tokio runtime."}
+{"item": 8, "rule": "blocking-in-async", "label": "TP", "reason": "std::fs call directly inside an async fn running on the tokio runtime."}
+{"item": 9, "rule": "blocking-in-async", "label": "TP", "reason": "std::fs::write inside async fn config_opt_inner."}
+{"item": 10, "rule": "blocking-in-async", "label": "TP", "reason": "std::fs::File::open inside a tokio::spawn'd task."}
+{"item": 11, "rule": "borrowed-clone", "label": "FP", "reason": "Clone shares root with engine_state, which is passed as &mut EngineState; the clone is needed to end the borrow (stated exemption)."}
+{"item": 12, "rule": "borrowed-clone", "label": "TP", "reason": "Receiver is &self, so cloning the PathBuf only to borrow it is unnecessary."}
+{"item": 13, "rule": "borrowed-clone", "label": "TP", "reason": "call is already &ast::Expr; cloning then borrowing is redundant (cheap refcount, but needless)."}
+{"item": 14, "rule": "borrowed-clone", "label": "TP", "reason": "node is already &SyntaxNode; clone-then-borrow is redundant."}
+{"item": 15, "rule": "dbg-macro", "label": "TP-intentional", "reason": "dbg! deliberately gated behind the MIETTE_DEBUG env var as opt-in diagnostics."}
+{"item": 16, "rule": "dbg-macro", "label": "TP-intentional", "reason": "dbg! deliberately gated behind the MIETTE_DEBUG env var as opt-in diagnostics."}
+{"item": 17, "rule": "dbg-macro", "label": "TP-intentional", "reason": "dbg! deliberately gated behind the MIETTE_DEBUG env var as opt-in diagnostics."}
+{"item": 18, "rule": "dbg-macro", "label": "TP-intentional", "reason": "Tiny build-info debug binary whose whole purpose is to dbg!-print the info."}
+{"item": 19, "rule": "dbg-macro", "label": "TP-intentional", "reason": "dbg! deliberately gated behind the MIETTE_DEBUG env var as opt-in diagnostics."}
+{"item": 20, "rule": "dbg-macro", "label": "TP-intentional", "reason": "dbg! deliberately gated behind the MIETTE_DEBUG env var as opt-in diagnostics."}
+{"item": 21, "rule": "dbg-macro", "label": "TP-intentional", "reason": "dbg! deliberately gated behind the MIETTE_DEBUG env var as opt-in diagnostics."}
+{"item": 22, "rule": "dbg-macro", "label": "TP-intentional", "reason": "dbg! deliberately gated behind the MIETTE_DEBUG env var as opt-in diagnostics."}
+{"item": 23, "rule": "dbg-macro", "label": "TP-intentional", "reason": "dbg! deliberately gated behind the MIETTE_DEBUG env var as opt-in diagnostics."}
+{"item": 24, "rule": "dbg-macro", "label": "TP", "reason": "Leftover dbg! for unknown events in a plugin (and misused with a format string)."}
+{"item": 25, "rule": "eager-fallback-alloc", "label": "FP", "reason": "\"\".to_owned() creates an empty String with zero capacity; no heap allocation (equivalent to String::new())."}
+{"item": 26, "rule": "eager-fallback-alloc", "label": "FP", "reason": "\"\".to_owned() creates an empty String with zero capacity; no heap allocation (equivalent to String::new())."}
+{"item": 27, "rule": "eager-fallback-alloc", "label": "TP", "reason": "Non-empty string literal .to_owned()/.to_string() allocates eagerly in unwrap_or."}
+{"item": 28, "rule": "eager-fallback-alloc", "label": "TP", "reason": "Non-empty string literal .to_owned()/.to_string() allocates eagerly in unwrap_or."}
+{"item": 29, "rule": "eager-fallback-alloc", "label": "FP", "reason": "\"\".to_string() creates an empty String with no heap allocation."}
+{"item": 30, "rule": "eager-fallback-alloc", "label": "TP", "reason": "Non-empty string literal .to_owned()/.to_string() allocates eagerly in unwrap_or."}
+{"item": 31, "rule": "eager-fallback-alloc", "label": "TP", "reason": "Eagerly builds the default path String (and evaluates its ?) even when KUBECONFIG is set."}
+{"item": 32, "rule": "eager-fallback-alloc", "label": "TP", "reason": "format! in ok_or allocates on success path."}
+{"item": 33, "rule": "eager-fallback-alloc", "label": "TP", "reason": "Non-empty string literal .to_owned()/.to_string() allocates eagerly in unwrap_or."}
+{"item": 34, "rule": "eager-fallback-alloc", "label": "TP", "reason": "Non-empty string literal .to_owned()/.to_string() allocates eagerly in unwrap_or."}
+{"item": 35, "rule": "eager-fallback-alloc", "label": "FP", "reason": "\"\".to_owned() creates an empty String with zero capacity; no heap allocation (equivalent to String::new())."}
+{"item": 36, "rule": "eager-fallback-alloc", "label": "FP", "reason": "\"\".to_owned() creates an empty String with zero capacity; no heap allocation (equivalent to String::new())."}
+{"item": 37, "rule": "exit-in-library", "label": "TP", "reason": "process::exit in zellij library crate (src/lib.rs exposes pub mod commands)."}
+{"item": 38, "rule": "exit-in-library", "label": "TP", "reason": "process::exit in zellij library crate (src/lib.rs exposes pub mod commands)."}
+{"item": 39, "rule": "exit-in-library", "label": "TP", "reason": "process::exit in zellij library crate (src/lib.rs exposes pub mod commands)."}
+{"item": 40, "rule": "exit-in-library", "label": "TP", "reason": "process::exit in zellij library crate (src/lib.rs exposes pub mod commands)."}
+{"item": 41, "rule": "exit-in-library", "label": "TP-intentional", "reason": "cargo's exit_with_error exists precisely to terminate the process with an exit code."}
+{"item": 42, "rule": "exit-in-library", "label": "TP", "reason": "process::exit inside zellij-utils library setup code."}
+{"item": 43, "rule": "exit-in-library", "label": "TP", "reason": "process::exit in zellij-client library crate."}
+{"item": 44, "rule": "exit-in-library", "label": "TP", "reason": "process::exit in zellij-client library crate."}
+{"item": 45, "rule": "exit-in-library", "label": "TP", "reason": "process::exit in zellij-client library crate."}
+{"item": 46, "rule": "exit-in-library", "label": "TP-intentional", "reason": "Function is explicitly named generate_unique_session_name_or_exit; exiting is its documented contract."}
+{"item": 47, "rule": "exit-in-library", "label": "TP", "reason": "process::exit in zellij library crate (src/lib.rs exposes pub mod commands)."}
+{"item": 48, "rule": "exit-in-library", "label": "TP-intentional", "reason": "exec command on Windows intentionally mirrors child exit status by exiting the shell."}
+{"item": 49, "rule": "format-push-string", "label": "TP", "reason": "push_str/+= with &format!(..) temporary allocation."}
+{"item": 50, "rule": "format-push-string", "label": "TP", "reason": "push_str/+= with &format!(..) temporary allocation."}
+{"item": 51, "rule": "format-push-string", "label": "TP", "reason": "push_str/+= with &format!(..) temporary allocation."}
+{"item": 52, "rule": "format-push-string", "label": "TP", "reason": "push_str/+= with &format!(..) temporary allocation."}
+{"item": 53, "rule": "format-push-string", "label": "TP", "reason": "push_str/+= with &format!(..) temporary allocation."}
+{"item": 54, "rule": "format-push-string", "label": "TP", "reason": "push_str/+= with &format!(..) temporary allocation."}
+{"item": 55, "rule": "format-push-string", "label": "TP", "reason": "push_str/+= with &format!(..) temporary allocation."}
+{"item": 56, "rule": "format-push-string", "label": "TP", "reason": "push_str/+= with &format!(..) temporary allocation."}
+{"item": 57, "rule": "format-push-string", "label": "TP", "reason": "push_str/+= with &format!(..) temporary allocation."}
+{"item": 58, "rule": "format-push-string", "label": "TP", "reason": "push_str/+= with &format!(..) temporary allocation."}
+{"item": 59, "rule": "format-push-string", "label": "TP", "reason": "push_str/+= with &format!(..) temporary allocation."}
+{"item": 60, "rule": "format-push-string", "label": "TP", "reason": "push_str/+= with &format!(..) temporary allocation."}
+{"item": 61, "rule": "panic-in-drop", "label": "TP-intentional", "reason": "thread Option is always Some until drop (set at construction); unwrap unreachable by construction."}
+{"item": 62, "rule": "panic-in-drop", "label": "TP-intentional", "reason": "inner is only taken in drop; expect documents an internal invariant."}
+{"item": 63, "rule": "panic-in-drop", "label": "TP", "reason": "io_uring submit can return an OS error, and expect would panic in drop."}
+{"item": 64, "rule": "panic-in-drop", "label": "TP-intentional", "reason": "assert checks an internal invariant of LocalSet teardown."}
+{"item": 65, "rule": "panic-in-drop", "label": "TP-intentional", "reason": "Deliberate invariant assert in a reset guard (message explains it)."}
+{"item": 66, "rule": "panic-in-drop", "label": "TP", "reason": "Mutex poisoning would panic in drop, and the guard can be dropped during unwinding."}
+{"item": 67, "rule": "panic-in-drop", "label": "TP", "reason": "io_uring submit can return an OS error, and expect would panic in drop."}
+{"item": 68, "rule": "panic-in-drop", "label": "TP", "reason": "thread::Builder::spawn(..).unwrap() in drop can panic if thread creation fails."}
+{"item": 69, "rule": "panic-in-drop", "label": "TP-intentional", "reason": "expect documents invariant that the thread handle is present until drop."}
+{"item": 70, "rule": "panic-in-drop", "label": "TP-intentional", "reason": "assert checks the runtime-entered invariant of a guard."}
+{"item": 71, "rule": "panic-in-drop", "label": "TP-intentional", "reason": "assert_eq deliberately verifies that all list entries were removed (commented)."}
+{"item": 72, "rule": "panic-in-drop", "label": "TP", "reason": "thread::Builder::spawn(..).unwrap() in drop can panic if thread creation fails."}
+{"item": 73, "rule": "placeholder-comment", "label": "TP-intentional", "reason": "Deliberate stub for unsupported platforms (cfg(not(any(windows,unix)))), explained in comment."}
+{"item": 74, "rule": "placeholder-comment", "label": "TP-intentional", "reason": "Deliberate stub for unsupported platforms (cfg(not(any(windows,unix)))), explained in comment."}
+{"item": 75, "rule": "placeholder-comment", "label": "FP", "reason": "'implementation here is unique' is a credit note, not a placeholder admission."}
+{"item": 76, "rule": "placeholder-comment", "label": "FP", "reason": "'implementation here is unique' is a credit note, not a placeholder admission."}
+{"item": 77, "rule": "redundant-box", "label": "TP-intentional", "reason": "Option<Box<Vec>> deliberately keeps Row at 48 bytes (static size assert nearby)."}
+{"item": 78, "rule": "redundant-box", "label": "TP", "reason": "Box<Vec<..>> field in LabeledError; LabeledError is already boxed in ShellError, so no evident size reason."}
+{"item": 79, "rule": "redundant-box", "label": "TP", "reason": "Box<Vec<..>> field in LabeledError; LabeledError is already boxed in ShellError, so no evident size reason."}
+{"item": 80, "rule": "satd-comment", "label": "TP", "reason": "Genuine TODO/FIXME/XXX marker admitting debt."}
+{"item": 81, "rule": "satd-comment", "label": "TP", "reason": "Genuine TODO/FIXME/XXX marker admitting debt."}
+{"item": 82, "rule": "satd-comment", "label": "TP", "reason": "Genuine TODO/FIXME/XXX marker admitting debt."}
+{"item": 83, "rule": "satd-comment", "label": "TP", "reason": "Genuine TODO/FIXME/XXX marker admitting debt."}
+{"item": 84, "rule": "satd-comment", "label": "TP", "reason": "Genuine TODO/FIXME/XXX marker admitting debt."}
+{"item": 85, "rule": "satd-comment", "label": "TP", "reason": "Genuine TODO/FIXME/XXX marker admitting debt."}
+{"item": 86, "rule": "satd-comment", "label": "TP", "reason": "Genuine TODO/FIXME/XXX marker admitting debt."}
+{"item": 87, "rule": "satd-comment", "label": "TP", "reason": "Genuine TODO/FIXME/XXX marker admitting debt."}
+{"item": 88, "rule": "satd-comment", "label": "TP", "reason": "Genuine TODO/FIXME/XXX marker admitting debt."}
+{"item": 89, "rule": "satd-comment", "label": "TP", "reason": "Genuine TODO/FIXME/XXX marker admitting debt."}
+{"item": 90, "rule": "satd-comment", "label": "TP", "reason": "Genuine TODO/FIXME/XXX marker admitting debt."}
+{"item": 91, "rule": "satd-comment", "label": "TP", "reason": "Genuine TODO/FIXME/XXX marker admitting debt."}
+{"item": 92, "rule": "swallowed-error", "label": "TP-intentional", "reason": "Live preview silently skips invalid input; the validation error surfaces on submit."}
+{"item": 93, "rule": "swallowed-error", "label": "FP", "reason": "Fuzz target harness (test-only code); ignoring the result is the point."}
+{"item": 94, "rule": "swallowed-error", "label": "TP", "reason": "Failure to spawn the reaper thread is silently discarded (child may become zombie)."}
+{"item": 95, "rule": "swallowed-error", "label": "TP-intentional", "reason": "Writing to a String cannot fail, so the fmt::Error is unreachable."}
+{"item": 96, "rule": "swallowed-error", "label": "TP-intentional", "reason": "Err means no applicable method; nothing to report to the callback."}
+{"item": 97, "rule": "swallowed-error", "label": "FP", "reason": "into_data's Err carries a non-data frame (e.g. trailers) to skip, not an error."}
+{"item": 98, "rule": "swallowed-error", "label": "TP", "reason": "Errors from theme preview run are silently discarded."}
+{"item": 99, "rule": "swallowed-error", "label": "TP-intentional", "reason": "Unreadable/missing desktop entry means nothing to uninstall; deliberate no-op."}
+{"item": 100, "rule": "swallowed-error", "label": "TP", "reason": "Failure to restore blocking mode is silently ignored, leaving the stream nonblocking."}
+{"item": 101, "rule": "swallowed-error", "label": "FP", "reason": "Code is in rustls's fuzzing helper module (fuzz-only harness)."}
+{"item": 102, "rule": "swallowed-error", "label": "TP", "reason": "Result discarded with .ok(); without logging."}
+{"item": 103, "rule": "swallowed-error", "label": "TP", "reason": "Result discarded with .ok(); without logging."}
+{"item": 104, "rule": "todo-in-production", "label": "TP-intentional", "reason": "Unsupported-platform impl where state() already errors, so pct_idle is unreachable."}
+{"item": 105, "rule": "todo-in-production", "label": "TP", "reason": "Public ChangeSet::map is an unfinished stub."}
+{"item": 106, "rule": "todo-in-production", "label": "TP-intentional", "reason": "Deprecated `-> !` methods deliberately shadow Deref'd Path methods."}
+{"item": 107, "rule": "todo-in-production", "label": "TP-intentional", "reason": "wasm32 platform stub for an unsupported target."}
+{"item": 108, "rule": "todo-in-production", "label": "TP", "reason": "todo!(\"builtin source\") reachable unfinished code in cargo."}
+{"item": 109, "rule": "todo-in-production", "label": "TP-intentional", "reason": "Only called from handshake subcommands, so the todo! arm is unreachable by construction."}
+{"item": 110, "rule": "todo-in-production", "label": "TP-intentional", "reason": "todo!(\"not used so far\") marks a variant not produced by current code."}
+{"item": 111, "rule": "todo-in-production", "label": "TP-intentional", "reason": "value is always String or Record by construction, so the todo! arm is unreachable."}
+{"item": 112, "rule": "todo-in-production", "label": "FP", "reason": "Parser test-data fixture, not production code."}
+{"item": 113, "rule": "todo-in-production", "label": "TP-intentional", "reason": "Deprecated `-> !` methods deliberately shadow Deref'd Path methods."}
+{"item": 114, "rule": "too-many-params", "label": "TP", "reason": "Inherent/free function with more than 5 non-self parameters."}
+{"item": 115, "rule": "too-many-params", "label": "TP", "reason": "Inherent/free function with more than 5 non-self parameters."}
+{"item": 116, "rule": "too-many-params", "label": "TP", "reason": "Inherent/free function with more than 5 non-self parameters."}
+{"item": 117, "rule": "too-many-params", "label": "TP", "reason": "Inherent/free function with more than 5 non-self parameters."}
+{"item": 118, "rule": "too-many-params", "label": "TP", "reason": "Inherent/free function with more than 5 non-self parameters."}
+{"item": 119, "rule": "too-many-params", "label": "TP", "reason": "Inherent/free function with more than 5 non-self parameters."}
+{"item": 120, "rule": "too-many-params", "label": "TP", "reason": "Inherent/free function with more than 5 non-self parameters."}
+{"item": 121, "rule": "too-many-params", "label": "TP", "reason": "Inherent/free function with more than 5 non-self parameters."}
+{"item": 122, "rule": "too-many-params", "label": "TP", "reason": "Inherent/free function with more than 5 non-self parameters."}
+{"item": 123, "rule": "too-many-params", "label": "TP", "reason": "Inherent/free function with more than 5 non-self parameters."}
+{"item": 124, "rule": "too-many-params", "label": "TP", "reason": "Inherent/free function with more than 5 non-self parameters."}
+{"item": 125, "rule": "too-many-params", "label": "TP", "reason": "Inherent/free function with more than 5 non-self parameters."}
+{"item": 126, "rule": "unbounded-send-sync", "label": "TP-intentional", "reason": "Documented: waker does not expose the value, so no T bound needed."}
+{"item": 127, "rule": "unbounded-send-sync", "label": "TP-intentional", "reason": "Documented: waker does not expose the value, so no T bound needed."}
+{"item": 128, "rule": "unbounded-send-sync", "label": "TP-intentional", "reason": "Internal scheduler queue; T is the scheduler handle type, deliberate unsafe impl."}
+{"item": 129, "rule": "unbounded-send-sync", "label": "TP-intentional", "reason": "Commented reasoning: only poll(&mut self) is used / stored future must be Send."}
+{"item": 130, "rule": "unbounded-send-sync", "label": "TP-intentional", "reason": "Mirrors std JoinHandle; T: Send enforced at spawn."}
+{"item": 131, "rule": "unbounded-send-sync", "label": "TP-intentional", "reason": "Internal scheduler queue; T is the scheduler handle type, deliberate unsafe impl."}
+{"item": 132, "rule": "unbounded-send-sync", "label": "TP-intentional", "reason": "Commented reasoning: only poll(&mut self) is used / stored future must be Send."}
+{"item": 133, "rule": "unbounded-send-sync", "label": "TP-intentional", "reason": "Commented reasoning: only poll(&mut self) is used / stored future must be Send."}
+{"item": 134, "rule": "unbounded-send-sync", "label": "TP-intentional", "reason": "Private raw-pointer buffer; public Worker/Stealer carry the T: Send bounds."}
+{"item": 135, "rule": "unbounded-send-sync", "label": "TP-intentional", "reason": "SyncWrapper pattern, documented: &SyncWrapper exposes nothing."}
+{"item": 136, "rule": "unbounded-send-sync", "label": "TP-intentional", "reason": "Mirrors std JoinHandle; T: Send enforced at spawn."}
+{"item": 137, "rule": "unbounded-send-sync", "label": "TP-intentional", "reason": "SAFETY comment: only raw pointers/PhantomData of T, so the impl is deliberate."}
+{"item": 138, "rule": "unused-io-amount", "label": "TP-intentional", "reason": "Zero-length read used only to wait for Enter; there is no data to lose."}
+{"item": 139, "rule": "unused-io-amount", "label": "TP-intentional", "reason": "Commented: 1-byte write deliberately assumed Ok(1)."}
+{"item": 140, "rule": "unused-io-amount", "label": "FP", "reason": "self.std.write is ripgrep's own method returning io::Result<()> via write_all, not Write::write."}
+{"item": 141, "rule": "unused-io-amount", "label": "FP", "reason": "BoGo test shim draining until EOF; test harness code, and discarded data is intentional."}
+{"item": 142, "rule": "unused-io-amount", "label": "TP-intentional", "reason": "Zero-length read used only to wait for Enter; there is no data to lose."}
+{"item": 143, "rule": "unused-io-amount", "label": "TP", "reason": "stdout().write may write partially; write_all is appropriate."}
+{"item": 144, "rule": "unwrap-in-result-fn", "label": "TP", "reason": "Iterator unwrap in xtask fn returning Result could be propagated."}
+{"item": 145, "rule": "unwrap-in-result-fn", "label": "TP-intentional", "reason": "to_lowercase() always yields at least one char."}
+{"item": 146, "rule": "unwrap-in-result-fn", "label": "TP", "reason": "File::open(..).unwrap() in a Result fn should use ?."}
+{"item": 147, "rule": "unwrap-in-result-fn", "label": "TP-intentional", "reason": "stderr was just set to piped, so take() is always Some."}
+{"item": 148, "rule": "unwrap-in-result-fn", "label": "TP-intentional", "reason": "Guarded by len >= 10 and short-circuit evaluation, so next() is always Some."}
+{"item": 149, "rule": "unwrap-in-result-fn", "label": "TP", "reason": "Conversion/decoding unwrap in fn returning Result/Option could be propagated."}
+{"item": 150, "rule": "unwrap-in-result-fn", "label": "TP", "reason": "Conversion/decoding unwrap in fn returning Result/Option could be propagated."}
+{"item": 151, "rule": "unwrap-in-result-fn", "label": "TP-intentional", "reason": "Guarded by flags non-empty check, so max() is always Some."}
+{"item": 152, "rule": "unwrap-in-result-fn", "label": "TP-intentional", "reason": "writeln! to a String cannot fail."}
+{"item": 153, "rule": "unwrap-in-result-fn", "label": "TP-intentional", "reason": "into_inner on a Vec-backed writer cannot fail."}
+{"item": 154, "rule": "unwrap-in-result-fn", "label": "TP-intentional", "reason": "Comment explicitly argues the call cannot fail."}
+{"item": 155, "rule": "unwrap-in-result-fn", "label": "TP", "reason": "thread spawn failure would panic instead of propagating in a Result fn."}

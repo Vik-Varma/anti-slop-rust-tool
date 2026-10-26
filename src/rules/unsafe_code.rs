@@ -321,7 +321,9 @@ impl Rule for UninitMemory {
             fn visit_expr_call(&mut self, c: &'ast syn::ExprCall) {
                 if let Expr::Path(p) = &*c.func {
                     let path = path_string(&p.path);
-                    if path == "mem::uninitialized" || path.ends_with("::mem::uninitialized") {
+                    if (path == "mem::uninitialized" || path.ends_with("::mem::uninitialized"))
+                        && self.sink.ctx().is_production_line(p.span().start().line)
+                    {
                         self.sink.emit_span(
                             p.span(),
                             "`mem::uninitialized()` is deprecated and undefined behaviour for most types",

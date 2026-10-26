@@ -524,6 +524,30 @@ impl<'ast> Visit<'ast> for Blocking<'_, '_, '_> {
         visit::visit_expr_call(self, c);
     }
     fn visit_expr_method_call(&mut self, m: &'ast syn::ExprMethodCall) {
+        if m.method == "block_on" {
+            // `rt.block_on(async { .. })` from synchronous code: the future is driven by the
+            // calling thread, so its body is not running inside another task's executor slot.
+            self.visit_expr(&m.receiver);
+            let prev = self.in_async;
+            let was_async = self.in_async;
+            if was_async {
+                self.report(
+                    m.method.span(),
+                    ".block_on()",
+                    "`.await` the future instead (this panics inside a runtime)",
+                );
+            }
+            self.in_async = false;
+            for arg in &m.args {
+                if let Expr::Async(a) = peel(arg) {
+                    self.visit_block(&a.block);
+                } else {
+                    self.visit_expr(arg);
+                }
+            }
+            self.in_async = prev;
+            return;
+        }
         if BLOCKING_METHODS.iter().any(|n| m.method == n) {
             let instead = if m.method == "block_on" {
                 "`.await` the future instead (this panics inside a runtime)"
@@ -651,13 +675,16 @@ async fn offloaded() {
     std::thread::spawn(move || fs::read("x"));
     asyncify(move || std::fs::remove_dir(p)).await;
 }
+fn sync_entry(rt: &Runtime) {
+    rt.block_on(async { std::fs::read("x") });
+}
 async fn inline_closure(paths: Vec<String>) {
     let v: Vec<_> = paths.iter().map(|p| std::fs::read(p)).collect();
 }
 fn sync() { thread::sleep(d); }
 async fn tokio_fs() { tokio::fs::read_to_string("x").await; tokio::time::sleep(d).await; }
 "#;
-        assert_eq!(lines(&check_rule("blocking-in-async", src)), vec![6, 7, 8, 9, 10, 18]);
+        assert_eq!(lines(&check_rule("blocking-in-async", src)), vec![6, 7, 8, 9, 10, 21]);
     }
 
     #[test]

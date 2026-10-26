@@ -28,7 +28,7 @@ from scipy import stats
 METRICS = ["cyclomatic", "cognitive", "max_nesting", "params", "try_ops"]
 FEATURES = [
     "f_clones", "f_expects", "f_panics", "f_as_casts", "f_magic_numbers", "f_unsafe_blocks",
-    "f_bool_params", "f_debt_comments", "f_comment_lines",
+    "f_bool_params", "f_debt_comments", "f_comment_lines", "f_deferral", "f_hedging",
 ]
 RULES = [
     "unwrap", "todo", "dbg-macro", "panic-in-drop", "static-mut", "uninit-memory",

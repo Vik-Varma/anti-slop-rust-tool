@@ -131,7 +131,7 @@ def main():
     b, se, _, p_sized = fit_logit(base_sized, y, files)
     _, _, _, p_churn = fit_logit(base_churn, y, files)
     _, _, _, p_repo = fit_logit(D, y, files)
-    w(f"\nSize alone: odds ratio per doubling of LOC = {math.exp(b[-1] * math.log(2)):.2f} "
+    w(f"\nSize alone: odds ratio per doubling of (1 + LOC) = {math.exp(b[-1] * math.log(2)):.2f} "
       f"(robust SE of log-odds {se[-1]:.3f}). AUC: repo only {auc(y, p_repo):.3f}, "
       f"+ size {auc(y, p_sized):.3f}, + prior churn {auc(y, p_churn):.3f}.\n")
 

@@ -25,7 +25,7 @@
 | wgpu | 5142 | 504 | 9.8% |
 | zellij | 2969 | 717 | 24.1% |
 
-Size alone: odds ratio per doubling of LOC = 2.13 (robust SE of log-odds 0.032). AUC: repo only 0.710, + size 0.835, + prior churn 0.840.
+Size alone: odds ratio per doubling of (1 + LOC) = 2.13 (robust SE of log-odds 0.032). AUC: repo only 0.710, + size 0.835, + prior churn 0.840.
 
 ## Results
 

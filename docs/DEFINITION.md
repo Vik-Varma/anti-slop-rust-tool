@@ -37,7 +37,7 @@ above 25%. The four default rules are exact by construction: each flags only the
 construct its experiment shows failing (`uninit-memory`, `float-eq-inexact`, `deny-warnings`,
 `blocking-sleep-in-async`). They also had no instances in shipping code to audit, since mature
 projects don't contain them. Every rule with audit data fell short of the 50% bar once a second,
-independent rater traced the code: `todo` (4/10 reachable) and `lock-held-across-await` (7/7 real
+independent rater traced the code: `todo` (6/15 reachable, census) and `lock-held-across-await` (7/7 real
 patterns, 0/7 able to deadlock as written) included. So all of them are notes.
 
 What that means in practice: the default run reports almost nothing on mature, well-reviewed
@@ -50,18 +50,24 @@ audit, was usually guarded by something a syntax check can't see.
 These are widely called bad. They fail the definition, and [EVIDENCE.md](EVIDENCE.md) has the
 numbers for each:
 
-- **High cyclomatic or cognitive complexity, long functions, deep nesting, many parameters.**
-  Each strongly predicts later bug fixes (odds ratios of 1.7 to 16 before adjustment), but mostly
-  because each measures size. Once function size is controlled for, cyclomatic and cognitive
-  complexity, length and complexity thresholds add nothing, and that held in a preregistered
-  replication on 15 new projects. Nesting depth and parameter count stayed slightly above 1 in
-  both corpora (odds ratios 1.06 to 1.18 per doubling), but not significantly in the
-  replication: a small effect isn't ruled out, and it would be far too weak to call code bad on.
-  Bigger functions do get more fixes in total, but not more fixes per line. (This is about
-  defects. Cognitive complexity is meant to measure understandability, which Muñoz Barón et al.,
-  ESEM 2020, found it partly does; that question isn't tested here.)
-- **TODO/FIXME/HACK comments**, and the "deferral" and "hedging" phrases that LLM-slop linters
-  look for. No size-independent link to bug fixes replicated.
+- **High cyclomatic or cognitive complexity, long functions, complexity thresholds.** Each
+  strongly predicts later bug fixes before adjustment (odds ratios of 1.7 to 12), mostly because
+  each measures size. Once function size is controlled for, no effect is detectable: the
+  preregistered replication on 15 new projects held for all of them, and with the corrected miner
+  the pooled interval for cyclomatic and cognitive complexity excludes anything above about 1.1
+  per doubling. Functions over 100 lines even came out less fix-prone than their size predicts,
+  which says the size control fits badly at the top, not that long functions are good. (This is
+  about defects. Cognitive complexity is meant to measure understandability, which Muñoz Barón et
+  al., ESEM 2020, found it partly does; that question isn't tested here.)
+- **Deep nesting, many parameters, TODO/FIXME/HACK comments.** These kept a small effect beyond
+  size. Pooled over all 35 projects: TODO comments odds ratio 1.41, nesting 1.15 and parameter
+  count 1.10 per doubling, with standard errors clustered by repository. Comment lines in a
+  function behaved the same way (1.13). The preregistered replication failed to confirm TODO
+  comments (H1) and nesting (H2), but it had only about 37% power to, so that result is
+  inconclusive, not a refutation. Even taken at face value the effects are small (a TODO comment
+  counts for about as much as 40% more lines), comments may simply mark code already known to be
+  tricky, and none has a failure to reproduce. The "deferral" and "hedging" phrases that LLM-slop
+  linters look for showed nothing detectable, but they were too rare to rule much out.
 - **Magic numbers, `.clone()` calls, boolean parameters, `as` casts in general.** There was no
   consistent effect after size, and magic numbers pointed the other way.
 - **`unimplemented!()`**: unlike `todo!()`, which "conveys an intent of implementing the

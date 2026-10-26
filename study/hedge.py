@@ -5,7 +5,8 @@ fix-prone functions? Adds two count columns to a mined CSV, from the snapshot's 
 The phrase lists are antislop 0.3.0's `antislop-standard` profile (https://crates.io/crates/antislop),
 applied to comment text only, as antislop applies them.
 
-Usage: hedge.py REPO_DIR DATA_CSV  (rewrites DATA_CSV with f_deferral and f_hedging)
+Usage: hedge.py REPO_DIR DATA_CSV OUT_CSV  (writes DATA_CSV plus f_deferral and f_hedging to OUT_CSV;
+never in place, so the study's own data files keep their columns)
 """
 
 import csv
@@ -24,7 +25,7 @@ HEDGING_RE = re.compile("|".join(HEDGING), re.I)
 
 
 def main():
-    repo, data = sys.argv[1], sys.argv[2]
+    repo, data, out_csv = sys.argv[1], sys.argv[2], sys.argv[3]
     snap = rev_before(repo, SNAPSHOT_DATE)
     with open(data) as f:
         rows = list(csv.DictReader(f))
@@ -38,7 +39,7 @@ def main():
         comments = [l[l.index("//"):] for l in lines if "//" in l]
         r["f_deferral"] = sum(bool(DEFERRAL_RE.search(c)) for c in comments)
         r["f_hedging"] = sum(bool(HEDGING_RE.search(c)) for c in comments)
-    with open(data, "w", newline="") as f:
+    with open(out_csv, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
         w.writeheader()
         w.writerows(rows)

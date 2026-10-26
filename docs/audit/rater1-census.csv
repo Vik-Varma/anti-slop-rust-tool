@@ -1,0 +1,39 @@
+rule,n,verdict,reason
+todo,0,YES,reachable with nightly builtin-deps
+todo,1,YES,two #[aggregate] attributes from user code
+todo,2,YES,qualified wildcard with no matching relation
+todo,3,NO,"pub(crate) scaffolding, never constructed"
+todo,4,NO,"pub(crate) scaffolding, never constructed"
+todo,5,NO,value is always Record or String
+todo,6,NO,no command returns Transition::Cmd
+todo,7,NO,exhaustive over pinned tray-icon variants
+todo,8,YES,public fn in a published crate
+todo,9,YES,public API on the web backend
+todo,10,YES,public API on the web backend
+todo,11,NO,map_binding_type only returns the four handled kinds
+todo,12,NO,validation prevents the CPU-emulated case
+todo,13,NO,Metal never advertises pipeline statistics
+todo,14,NO,other query types unsupported and not advertised
+ignored-io-error,0,NO,commented: about to exit
+ignored-io-error,1,YES,credential write failure reported as Ok
+ignored-io-error,2,YES,credential write failure reported as Ok
+ignored-io-error,3,NO,commented best-effort instance-uid
+ignored-io-error,4,NO,commented: not critical after persist
+ignored-io-error,5,NO,already returning the original error
+ignored-io-error,6,NO,already returning the original error
+ignored-io-error,7,NO,already returning the original error
+ignored-io-error,8,YES,IPC flush failure reported as success
+ignored-io-error,9,YES,IPC flush failure reported as success
+ignored-io-error,10,YES,IPC flush failure reported as success
+ignored-io-error,11,YES,IPC flush failure reported as success
+ignored-io-error,12,NO,commented best-effort flush
+ignored-io-error,13,YES,"lock file left untruncated, Ok returned"
+ignored-io-error,14,NO,test double in src
+ignored-io-error,15,NO,best-effort log rotation
+lock-held-across-await,0,YES,sync guard alive at the await
+lock-held-across-await,1,YES,sync guard alive at the await
+lock-held-across-await,2,YES,sync guard alive at the await
+lock-held-across-await,3,YES,sync guard alive at the await
+lock-held-across-await,4,YES,sync guard alive at the await
+lock-held-across-await,5,YES,sync guard alive at the await
+lock-held-across-await,6,YES,sync guard alive at the await

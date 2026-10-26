@@ -1,6 +1,6 @@
 # Exploratory: antislop's deferral and hedging phrases
 
-Not preregistered: added after the replication, when antislop (crates.io, 0.3.0) came up. The phrase lists are its `antislop-standard` profile, matched against comment lines inside each function (`hedge.py`). Same models and columns as `results.md`; TODO/FIXME (`f_debt_comments`) repeated for comparison.
+Not preregistered: added after the replication, when antislop (crates.io, 0.3.0) came up. The phrase lists are its `antislop-standard` profile, matched against comment lines inside each function (`hedge.py`). The counts are in `study/phrases-*.csv` (only functions with at least one phrase; every other function has zero); join them onto `study/data*/` by repo, path and function to re-run. Same models and columns as `results.md`; TODO/FIXME (`f_debt_comments`) repeated for comparison.
 
 ## data
 

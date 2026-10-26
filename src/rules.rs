@@ -129,7 +129,7 @@ static RULES: &[Rule] = &[
                backend features and mocks, not unfinished work.",
         false_positives: "None for the panic itself.",
         evidence: Evidence::Demonstrated,
-        precision: "validation sample, two raters (docs/AUDIT.md): 4 of 10 reachable; the rest sat on branches nothing can reach, i.e. `todo!()` used as `unreachable!()`",
+        precision: "census, two raters (docs/AUDIT.md): 6 of 15 reachable; the rest sat on branches nothing can reach, i.e. `todo!()` used as `unreachable!()`",
         sources: &[
             "std::todo: https://doc.rust-lang.org/std/macro.todo.html",
             "experiments/tests/panics.rs: todo_compiles_and_panics_at_runtime",
@@ -234,7 +234,7 @@ static RULES: &[Rule] = &[
                on a current-thread Tokio runtime; the same code with `tokio::sync::Mutex` finishes.",
         false_positives: "A `lock()` method on a type that isn't a lock. Guards moved elsewhere aren't tracked.",
         evidence: Evidence::Demonstrated,
-        precision: "two raters (docs/AUDIT.md): 7 of 7 really hold a sync guard across `.await`, 0 of 7 can deadlock as written (nothing else takes the lock meanwhile); 6 were in tests",
+        precision: "census, two raters (docs/AUDIT.md): 7 of 7 really hold a sync guard across `.await`, 0 of 7 can deadlock as written (nothing else takes the lock meanwhile); 6 were in tests",
         sources: &[
             "Clippy await_holding_lock (suspicious): https://rust-lang.github.io/rust-clippy/master/index.html#await_holding_lock",
             "Tokio Mutex docs, which mutex to use: https://docs.rs/tokio/latest/tokio/sync/struct.Mutex.html",
@@ -272,7 +272,7 @@ static RULES: &[Rule] = &[
         false_positives: "Best-effort writes where loss is acceptable. Writes to stdout/stderr and removals \
                           aren't flagged.",
         evidence: Evidence::Demonstrated,
-        precision: "validation sample, two raters (docs/AUDIT.md): 4 of 10 hid a failed flush or write from a caller expecting an error; 6 were best-effort writes on an error path or during shutdown",
+        precision: "census, two raters (docs/AUDIT.md): 7 of 16 hid a failed flush, write or sync from a caller expecting an error; the rest were deliberate best-effort writes, writes on an error path, or test doubles",
         sources: &[
             "CWE-252 Unchecked Return Value: https://cwe.mitre.org/data/definitions/252.html",
             "Yuan et al., Simple Testing Can Prevent Most Critical Failures, OSDI 2014: https://www.usenix.org/conference/osdi14/technical-sessions/presentation/yuan",

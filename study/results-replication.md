@@ -20,7 +20,7 @@
 | typst | 3668 | 168 | 4.6% |
 | zola | 395 | 33 | 8.4% |
 
-Size alone: odds ratio per doubling of LOC = 1.92 (robust SE of log-odds 0.040). AUC: repo only 0.760, + size 0.837, + prior churn 0.840.
+Size alone: odds ratio per doubling of (1 + LOC) = 1.92 (robust SE of log-odds 0.040). AUC: repo only 0.760, + size 0.837, + prior churn 0.840.
 
 ## Results
 

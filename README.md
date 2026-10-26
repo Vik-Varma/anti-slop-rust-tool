@@ -16,10 +16,14 @@ literature), then tested each one:
   bug fixes than functions of the same size without it. The hypotheses were fixed in advance
   of the confirming data.
 
-Many popular claims failed. High cyclomatic or cognitive complexity, long functions, deep
-nesting, many parameters, magic numbers, and TODO/FIXME comments all predict bug fixes only
-because they measure size. Once size is controlled for, none of them adds anything, and that
-held up in a preregistered replication. So this tool doesn't flag them.
+Many popular claims failed. Cyclomatic and cognitive complexity, long functions, complexity
+thresholds, more than 7 parameters, magic numbers and `.clone()` calls predict bug fixes because
+they measure size. Once size is controlled for, no effect is detectable, and for cyclomatic and
+cognitive complexity a preregistered replication agreed. A few patterns kept a small effect
+beyond size: TODO/FIXME comments (odds ratio about 1.4 pooled over 35 projects), and parameter
+count, nesting depth and comment lines (about 1.1 to 1.2 per doubling). The replication was too
+small to confirm TODO comments or nesting (about 37% power), so those are inconclusive, not
+refuted. None of them has a failure to reproduce, so this tool doesn't flag them.
 
 The definition, decision rules and limits are in [docs/DEFINITION.md](docs/DEFINITION.md).
 Every claim, kept or rejected, is in [docs/EVIDENCE.md](docs/EVIDENCE.md), and the hand audit is
@@ -70,8 +74,8 @@ verdicts:
 | Rule | Flags | Audit (settled) |
 |---|---|---|
 | `lock-held-across-await` | a std/parking_lot/stdout guard alive at an `.await` | 7/7 real patterns, 0/7 could deadlock as written |
-| `ignored-io-error` | `let _ =`/`.ok();` on write/flush/sync/rename in a fn returning `Result` | 4/10 |
-| `todo` | `todo!()` in shipping code | 4/10 reachable |
+| `ignored-io-error` | `let _ =`/`.ok();` on write/flush/sync/rename in a fn returning `Result` | 7/16 (census) |
+| `todo` | `todo!()` in shipping code | 6/15 reachable (census) |
 | `panic-on-input` | `.unwrap()` on parse/decode/file/env/`to_str` results | 5/20 crash on real input |
 | `panic-in-drop` | `unwrap`/`expect`/`panic!` in `Drop::drop`, unless guarded by `thread::panicking()` | 1/10 |
 | `unwrap` | other `.unwrap()` in shipping code | 2/20 |

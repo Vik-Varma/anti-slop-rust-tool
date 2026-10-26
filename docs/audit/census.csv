@@ -1,0 +1,39 @@
+rule,n,repo,commit,location,function,rater1,rater2,settled,why
+ignored-io-error,0,fd,c44735ec0f,src/walk.rs:261,ReceiverBuffer::print,NO,NO,NO,Returns Err(KilledBySigint) anyway
+ignored-io-error,1,gitoxide,9f805e24a0,gix-credentials/src/helper/invoke.rs:13,Action::send,YES,YES,YES,"Store/erase write to helper fails silently, Ok returned"
+ignored-io-error,2,gitoxide,9f805e24a0,gix-credentials/src/helper/invoke.rs:14,Action::send,YES,YES,YES,"Store/erase newline write fails silently, Ok returned"
+ignored-io-error,3,meilisearch,7b6f9f39bd,crates/meilisearch/src/lib.rs:618,import_dump,NO,YES,NO,deliberate and commented; the instance-uid is not critical and is regenerated
+ignored-io-error,4,meilisearch,7b6f9f39bd,crates/meilisearch/src/routes/tasks/compact.rs:174,execute_task_queue_compaction,NO,YES,YES,"fsync after the rename: a failed sync_all can leave the renamed task queue without its data after a crash, while compaction reports success"
+ignored-io-error,5,nushell,706259d6f8,crates/nu-command/src/filesystem/save.rs:703,stream_to_file,NO,NO,NO,Error branch; function returns Err anyway
+ignored-io-error,6,nushell,706259d6f8,crates/nu-protocol/src/pipeline/byte_stream.rs:1199,copy_with_signals,NO,NO,NO,Error branch; caller still receives Err
+ignored-io-error,7,nushell,706259d6f8,crates/nu-protocol/src/pipeline/byte_stream.rs:1217,copy_with_signals,NO,NO,NO,Error branch; caller still receives Err
+ignored-io-error,8,zellij,ffb334a949,zellij-utils/src/ipc.rs:453,IpcSenderWithContext::send_client_msg,YES,YES,YES,"BufWriter flush failure leaves message unsent, Ok returned"
+ignored-io-error,9,zellij,ffb334a949,zellij-utils/src/ipc.rs:460,IpcSenderWithContext::send_server_msg,YES,YES,YES,"BufWriter flush failure leaves message unsent, Ok returned"
+ignored-io-error,10,zellij,ffb334a949,zellij-utils/src/ipc.rs:598,send_protobuf_client_to_server,YES,YES,YES,"BufWriter flush failure leaves message unsent, Ok returned"
+ignored-io-error,11,zellij,ffb334a949,zellij-utils/src/ipc.rs:608,send_protobuf_server_to_client,YES,YES,YES,"BufWriter flush failure leaves message unsent, Ok returned"
+ignored-io-error,12,zellij,ffb334a949,zellij-utils/src/ipc.rs:651,async_send_kill_and_await,NO,NO,NO,Unbuffered socket; write_all already succeeded with ?
+ignored-io-error,13,zellij,ffb334a949,zellij-window/src/app/instance.rs:68,become_primary,YES,NO,NO,truncates a lock file whose pid nobody reads; the flock is the lock
+ignored-io-error,14,zellij,ffb334a949,zellij-window/src/dbus.rs:1335,FakeSessionBus::call_client,NO,NO,NO,FakeSessionBus is test-support only
+ignored-io-error,15,zellij,ffb334a949,zellij-window/src/unattended.rs:62,open_log,NO,NO,NO,Log rotation rename only; no data loss reported as success
+lock-held-across-await,0,rustup,ce2c96b063,src/cli/self_update.rs:1349,check_rustup_update,YES guard held,YES guard held; NO harm,NO,"StdoutLock held across download; no progress bar, nothing else writes stdout"
+lock-held-across-await,1,zellij,ffb334a949,zellij-client/src/web_client/unit/web_client_tests.rs:560,test_full_session_flow,YES guard held,YES guard held; NO harm,NO,mock_apis guard alive; map only locked when POST /session creates client
+lock-held-across-await,2,zellij,ffb334a949,zellij-client/src/web_client/unit/web_client_tests.rs:1152,test_client_cleanup_removes_from_connection_table,YES guard held,YES guard held; NO harm,NO,"mock_apis guard alive; both clients created earlier, no contender"
+lock-held-across-await,3,zellij,ffb334a949,zellij-client/src/web_client/unit/web_client_tests.rs:1409,test_different_exit_reasons_handled_properly,YES guard held,YES guard held; NO harm,NO,"mock_apis guard alive at sleep; server aborted, nothing locks map"
+lock-held-across-await,4,zellij,ffb334a949,zellij-client/src/web_client/unit/web_client_tests.rs:1792,test_regular_token_uses_first_client_connected_for_new_session,YES guard held,YES guard held; NO harm,NO,first_messages_sent guard alive; only locked at one-time session spawn
+lock-held-across-await,5,zellij,ffb334a949,zellij-client/src/web_client/unit/web_client_tests.rs:1792,test_regular_token_uses_first_client_connected_for_new_session,YES guard held,YES guard held; NO harm,NO,sessions_created guard alive; only locked at one-time session spawn
+lock-held-across-await,6,zellij,ffb334a949,zellij-client/src/web_client/unit/web_client_tests.rs:2665,test_control_websocket_accepts_own_web_client_id,YES guard held,YES guard held; NO harm,NO,mock_apis guard alive; no new session created during close
+todo,0,cargo,b57863321f,src/workspace/source_id.rs:414,SourceId::load,YES,YES,YES,Nightly builtin-dependencies manifest reaches SourceId::load todo
+todo,1,diesel,dde3b22cae,diesel_derives/src/sql_function.rs:1228,merge_attributes,YES,YES,YES,#[aggregate] on extern block and fn panics the shipped proc macro
+todo,2,diesel,dde3b22cae,diesel_infer_query/src/select.rs:433,infer_projection,YES,YES,YES,diesel_cli: user SQL with unknown qualified wildcard hits todo
+todo,3,gitoxide,9f805e24a0,gix-ref/src/store/general/handle/find.rs:17,Handle::try_find,NO,NO,NO,"pub(crate) dead scaffolding Handle, never constructed"
+todo,4,gitoxide,9f805e24a0,gix-ref/src/store/general/handle/find.rs:30,Handle::find,NO,NO,NO,"pub(crate) dead scaffolding Handle, never constructed"
+todo,5,nushell,706259d6f8,crates/nu-cmd-lang/src/core_commands/error_make.rs:158,ErrorMake::run,NO,NO,NO,value is always Record or String
+todo,6,nushell,706259d6f8,crates/nu-explore/src/explore/pager/mod.rs:458,run_command,NO,NO,NO,No command.react returns Transition::Cmd
+todo,7,tauri,1fc6d9c85c,crates/tauri/src/tray/mod.rs:196,TrayIconEvent::from,NO,NO,NO,All variants of pinned tray-icon version covered
+todo,8,tauri,1fc6d9c85c,crates/tauri-utils/src/acl/identifier.rs:75,Identifier::set_prefix,YES,NO,YES,public function in a published crate (tauri-utils): any downstream caller panics; same call as round 4
+todo,9,wgpu,100c142937,wgpu/src/backend/webgpu.rs:2312,WebDevice::create_bind_group_layout,YES,YES,YES,Public API on web backend reaches todo with acceleration structure binding
+todo,10,wgpu,100c142937,wgpu/src/backend/webgpu.rs:3687,WebPipelineCache::get_data,YES,YES,YES,PipelineCache::get_data on web backend panics
+todo,11,wgpu,100c142937,wgpu-hal/src/dx12/device.rs:1203,Device::create_pipeline_layout,NO,NO,NO,map_binding_type only yields the four handled range types
+todo,12,wgpu,100c142937,wgpu-hal/src/gles/queue.rs:451,Queue::process,NO,NO,NO,Validation prevents both buffers being CPU-emulated
+todo,13,wgpu,100c142937,wgpu-hal/src/metal/command.rs:889,CommandEncoder::copy_query_results,NO,NO,NO,Metal never advertises pipeline statistics queries
+todo,14,wgpu,100c142937,wgpu-hal/src/metal/device.rs:2080,Device::create_query_set,NO,NO,NO,Metal never advertises pipeline statistics queries

@@ -10,6 +10,7 @@ Each rule was run over 37 codebases: the 35 study projects at the commits in `st
 | 2 | 31337 | after the round-1 fixes | confirmed them; split `panic-on-input` out of `unwrap` |
 | 3 | 4242 | after the round-2 fixes | tuned `panic-on-input` (argument counts, `xtask-*` crates), `panic-in-drop` (assertions, `thread::panicking()` guards) and `ignored-io-error` (only in functions returning `Result`) |
 | 4 | 777 | final build | **validation**: nothing was tuned on it, it was judged by two raters, and its settled numbers set the severities |
+| 5 | none (census) | current build | **census** of `todo` and `ignored-io-error`, whose round-4 samples (4 / 10 each) couldn't say which side of the 50% gate they were on, and of `lock-held-across-await`; every finding, two raters |
 
 ## Two raters
 
@@ -19,28 +20,84 @@ Agreement was 80% over 70 findings, Cohen's κ = 0.54 (moderate). Per rule: igno
 
 ## Results by rule
 
-| Rule | Findings in corpus | Rater 1 | Rater 2 | Settled | Severity |
-|---|---:|---|---|---|---|
-| todo | 15 | 10 / 10 | 3 / 10 | **4 / 10** | note |
-| panic-on-input | 222 | 8 / 20 | 5 / 20 | **5 / 20** | note |
-| ignored-io-error | 14 | 4 / 10 | 4 / 10 | **4 / 10** | note |
-| panic-in-drop | 42 | 3 / 10 | 1 / 10 | **1 / 10** | note |
-| unwrap | 5,214 | 2 / 20 | 2 / 20 | **2 / 20** | note |
-| lock-held-across-await | 7 | 7 / 7 hold a guard | 7 / 7 hold a guard, 0 / 7 can deadlock | **0 / 7 can deadlock** | note |
+| Rule | Findings in corpus (current build) | Rater 1 | Rater 2 | Settled | 95% CI | Severity |
+|---|---:|---|---|---|---|---|
+| todo | 15 | 6 / 15 | 5 / 15 | **6 / 15** (census) | 16% to 68% | note |
+| panic-on-input | 238 | 8 / 20 | 5 / 20 | **5 / 20** | 9% to 49% | note |
+| ignored-io-error | 16 | 7 / 16 | 8 / 16 | **7 / 16** (census) | 20% to 70% | note |
+| panic-in-drop | 39 | 3 / 10 | 1 / 10 | **1 / 10** | 0% to 45% | note |
+| unwrap | 5,268 | 2 / 20 | 2 / 20 | **2 / 20** | 1% to 32% | note |
+| lock-held-across-await | 7 | 7 / 7 hold a guard | 7 / 7 hold a guard, 0 / 7 can deadlock | **0 / 7 can deadlock** (census) | 0% to 41% | note |
+
+The round-4 sample numbers for `todo` and `ignored-io-error` (4 / 10 each) are superseded by the census below. Finding counts are from the current build; the samples were drawn from earlier builds, so they differ (for example, `panic-in-drop` had 42 when sampled). The 95% intervals are Clopper-Pearson. A census has no sampling error for this corpus, so 40% and 44% are these rules' precision here; the interval says how far that could be from their precision on other code. Rater 2 is a Claude agent like rater 1, so the two aren't fully independent, and no human has re-judged the findings.
 
 Rules judged in earlier rounds by rater 1 only:
 
-| Rule | Findings in corpus | Real / sampled | Round | Severity |
+| Rule | Findings in corpus (current build) | Real / sampled | Round | Severity |
 |---|---:|---|---|---|
 | static-mut | 12 | 0 / 10 races (all deliberate) | 3 | note |
-| process-exit-in-library | 152 | 0 / 10 lost data (10 / 10 were library exits) | 3 | note |
-| unsafe-without-comment | 4,354 | 20 / 20 lacked a justification; none shown unsound | 3 | note |
-| len-truncating-cast | 442 | 0 / 20 shown reachable | 1 | note |
+| process-exit-in-library | 144 | 0 / 10 lost data (10 / 10 were library exits) | 3 | note |
+| unsafe-without-comment | 4,698 | 20 / 20 lacked a justification; none shown unsound | 3 | note |
+| len-truncating-cast | 323 | 0 / 20 shown reachable | 1 | note |
 | dbg-macro | 10 | 1 / 10 accidental | 1 | note |
 | unused-io-amount (dropped) | 136 | 0 / 10 | 1 | dropped |
 | mem-forget (dropped) | 40 | 0 / 10 | 1 | dropped |
 | uninit-memory, float-eq-inexact | 0 | no instances | n/a | error, warning |
 | blocking-sleep-in-async, deny-warnings | 0 in shipping code | all were in tests or examples, which are now exempt | 1 | warning |
+
+## Round 5: census
+
+Round 4 left `todo` and `ignored-io-error` at 4 / 10, and a 10-finding sample can't tell 40% from 60%. So every finding of both rules on the current build was judged, as were all 7 `lock-held-across-await` findings. Rater 2 was a fresh independent agent with the same instructions as before (`docs/audit/rater2-instructions.txt`), kept from these docs and from rater 1's verdicts.
+
+Agreement: `todo` 14 / 15 (κ 0.86), `ignored-io-error` 13 / 16 (κ 0.62), `lock-held-across-await` 7 / 7. The four disagreements were settled as below, with the reason in the table. Raw verdicts: `docs/audit/rater1-census.csv`, `docs/audit/rater2-census.csv`; settled: `docs/audit/census.csv`.
+
+- `todo` #8 (rater 1 yes, rater 2 no): a public function in a published crate, as in round 4. Settled **yes**.
+- `ignored-io-error` #3 (no, yes): deliberate and commented, and the value is regenerated. Settled **no**.
+- `ignored-io-error` #4 (no, yes): the fsync comes after the rename, so a failed `sync_all` can lose the compacted file's data in a crash. Settled **yes**.
+- `ignored-io-error` #13 (yes, no): the truncated lock file holds a pid nobody reads. Settled **no**.
+
+Settled: `todo` 6 / 15 (40%), `ignored-io-error` 7 / 16 (44%), `lock-held-across-await` 0 / 7 can deadlock. All three stay below the 50% gate and stay notes. 6 of the 7 lock findings are in zellij's test module, which this rule checks on purpose: a deadlock hangs a test too.
+
+| Rule | # | Location | Rater 1 | Rater 2 | Settled | Why (settled) |
+|---|---:|---|---|---|---|---|
+| ignored-io-error | 0 | fd @ c44735ec0f: `src/walk.rs:261` | no | no | **no** | Returns Err(KilledBySigint) anyway |
+| ignored-io-error | 1 | gitoxide @ 9f805e24a0: `gix-credentials/src/helper/invoke.rs:13` | yes | yes | **yes** | Store/erase write to helper fails silently, Ok returned |
+| ignored-io-error | 2 | gitoxide @ 9f805e24a0: `gix-credentials/src/helper/invoke.rs:14` | yes | yes | **yes** | Store/erase newline write fails silently, Ok returned |
+| ignored-io-error | 3 | meilisearch @ 7b6f9f39bd: `crates/meilisearch/src/lib.rs:618` | no | yes | **no** | deliberate and commented; the instance-uid is not critical and is regenerated |
+| ignored-io-error | 4 | meilisearch @ 7b6f9f39bd: `crates/meilisearch/src/routes/tasks/compact.rs:174` | no | yes | **yes** | fsync after the rename: a failed sync_all can leave the renamed task queue without its data after a crash, while compaction reports success |
+| ignored-io-error | 5 | nushell @ 706259d6f8: `crates/nu-command/src/filesystem/save.rs:703` | no | no | **no** | Error branch; function returns Err anyway |
+| ignored-io-error | 6 | nushell @ 706259d6f8: `crates/nu-protocol/src/pipeline/byte_stream.rs:1199` | no | no | **no** | Error branch; caller still receives Err |
+| ignored-io-error | 7 | nushell @ 706259d6f8: `crates/nu-protocol/src/pipeline/byte_stream.rs:1217` | no | no | **no** | Error branch; caller still receives Err |
+| ignored-io-error | 8 | zellij @ ffb334a949: `zellij-utils/src/ipc.rs:453` | yes | yes | **yes** | BufWriter flush failure leaves message unsent, Ok returned |
+| ignored-io-error | 9 | zellij @ ffb334a949: `zellij-utils/src/ipc.rs:460` | yes | yes | **yes** | BufWriter flush failure leaves message unsent, Ok returned |
+| ignored-io-error | 10 | zellij @ ffb334a949: `zellij-utils/src/ipc.rs:598` | yes | yes | **yes** | BufWriter flush failure leaves message unsent, Ok returned |
+| ignored-io-error | 11 | zellij @ ffb334a949: `zellij-utils/src/ipc.rs:608` | yes | yes | **yes** | BufWriter flush failure leaves message unsent, Ok returned |
+| ignored-io-error | 12 | zellij @ ffb334a949: `zellij-utils/src/ipc.rs:651` | no | no | **no** | Unbuffered socket; write_all already succeeded with ? |
+| ignored-io-error | 13 | zellij @ ffb334a949: `zellij-window/src/app/instance.rs:68` | yes | no | **no** | truncates a lock file whose pid nobody reads; the flock is the lock |
+| ignored-io-error | 14 | zellij @ ffb334a949: `zellij-window/src/dbus.rs:1335` | no | no | **no** | FakeSessionBus is test-support only |
+| ignored-io-error | 15 | zellij @ ffb334a949: `zellij-window/src/unattended.rs:62` | no | no | **no** | Log rotation rename only; no data loss reported as success |
+| lock-held-across-await | 0 | rustup @ ce2c96b063: `src/cli/self_update.rs:1349` | yes guard held | yes guard held; no harm | **no** | StdoutLock held across download; no progress bar, nothing else writes stdout |
+| lock-held-across-await | 1 | zellij @ ffb334a949: `zellij-client/src/web_client/unit/web_client_tests.rs:560` | yes guard held | yes guard held; no harm | **no** | mock_apis guard alive; map only locked when POST /session creates client |
+| lock-held-across-await | 2 | zellij @ ffb334a949: `zellij-client/src/web_client/unit/web_client_tests.rs:1152` | yes guard held | yes guard held; no harm | **no** | mock_apis guard alive; both clients created earlier, no contender |
+| lock-held-across-await | 3 | zellij @ ffb334a949: `zellij-client/src/web_client/unit/web_client_tests.rs:1409` | yes guard held | yes guard held; no harm | **no** | mock_apis guard alive at sleep; server aborted, nothing locks map |
+| lock-held-across-await | 4 | zellij @ ffb334a949: `zellij-client/src/web_client/unit/web_client_tests.rs:1792` | yes guard held | yes guard held; no harm | **no** | first_messages_sent guard alive; only locked at one-time session spawn |
+| lock-held-across-await | 5 | zellij @ ffb334a949: `zellij-client/src/web_client/unit/web_client_tests.rs:1792` | yes guard held | yes guard held; no harm | **no** | sessions_created guard alive; only locked at one-time session spawn |
+| lock-held-across-await | 6 | zellij @ ffb334a949: `zellij-client/src/web_client/unit/web_client_tests.rs:2665` | yes guard held | yes guard held; no harm | **no** | mock_apis guard alive; no new session created during close |
+| todo | 0 | cargo @ b57863321f: `src/workspace/source_id.rs:414` | yes | yes | **yes** | Nightly builtin-dependencies manifest reaches SourceId::load todo |
+| todo | 1 | diesel @ dde3b22cae: `diesel_derives/src/sql_function.rs:1228` | yes | yes | **yes** | #[aggregate] on extern block and fn panics the shipped proc macro |
+| todo | 2 | diesel @ dde3b22cae: `diesel_infer_query/src/select.rs:433` | yes | yes | **yes** | diesel_cli: user SQL with unknown qualified wildcard hits todo |
+| todo | 3 | gitoxide @ 9f805e24a0: `gix-ref/src/store/general/handle/find.rs:17` | no | no | **no** | pub(crate) dead scaffolding Handle, never constructed |
+| todo | 4 | gitoxide @ 9f805e24a0: `gix-ref/src/store/general/handle/find.rs:30` | no | no | **no** | pub(crate) dead scaffolding Handle, never constructed |
+| todo | 5 | nushell @ 706259d6f8: `crates/nu-cmd-lang/src/core_commands/error_make.rs:158` | no | no | **no** | value is always Record or String |
+| todo | 6 | nushell @ 706259d6f8: `crates/nu-explore/src/explore/pager/mod.rs:458` | no | no | **no** | No command.react returns Transition::Cmd |
+| todo | 7 | tauri @ 1fc6d9c85c: `crates/tauri/src/tray/mod.rs:196` | no | no | **no** | All variants of pinned tray-icon version covered |
+| todo | 8 | tauri @ 1fc6d9c85c: `crates/tauri-utils/src/acl/identifier.rs:75` | yes | no | **yes** | public function in a published crate (tauri-utils): any downstream caller panics; same call as round 4 |
+| todo | 9 | wgpu @ 100c142937: `wgpu/src/backend/webgpu.rs:2312` | yes | yes | **yes** | Public API on web backend reaches todo with acceleration structure binding |
+| todo | 10 | wgpu @ 100c142937: `wgpu/src/backend/webgpu.rs:3687` | yes | yes | **yes** | PipelineCache::get_data on web backend panics |
+| todo | 11 | wgpu @ 100c142937: `wgpu-hal/src/dx12/device.rs:1203` | no | no | **no** | map_binding_type only yields the four handled range types |
+| todo | 12 | wgpu @ 100c142937: `wgpu-hal/src/gles/queue.rs:451` | no | no | **no** | Validation prevents both buffers being CPU-emulated |
+| todo | 13 | wgpu @ 100c142937: `wgpu-hal/src/metal/command.rs:889` | no | no | **no** | Metal never advertises pipeline statistics queries |
+| todo | 14 | wgpu @ 100c142937: `wgpu-hal/src/metal/device.rs:2080` | no | no | **no** | Metal never advertises pipeline statistics queries |
 
 ## Round 4 (validation) judgments
 

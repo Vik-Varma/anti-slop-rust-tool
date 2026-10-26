@@ -10,8 +10,8 @@ A pattern of Rust code is **bad** when both of these hold:
 1. **It has a failure mechanism.** There is a concrete way it makes a program do the wrong thing:
    undefined behaviour, a panic or abort, a deadlock or stall, data silently lost, or a build that
    breaks without the code changing. Either the mechanism is reproduced by a program in
-   `experiments/`, or (for the one rule where it can't be) the claim is the Rust project's own
-   stated policy. Folklore, taste and "it looks complicated" don't count.
+   `experiments/`, or (for the one rule where it can't be) the Rust project requires it of its own
+   compiler and standard library. Folklore, taste and "it looks complicated" don't count.
 2. **The mechanism is a real risk where the pattern appears.** A check that mostly flags safe
    code teaches people to ignore it. So each rule was run over 37 real codebases and a random
    sample of its findings was checked by hand ([AUDIT.md](AUDIT.md)).

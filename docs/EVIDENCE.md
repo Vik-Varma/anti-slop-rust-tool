@@ -41,7 +41,7 @@ the pattern at all.
 | `len-truncating-cast` | `len() as u32` wraps silently | a real 4 GiB + 1 `Vec`: `len() as u32 == 1` | 0/20 shown reachable | **note** |
 | `unwrap` | unwrap panics without context | as above | 2/20 can fail at run time | **note** |
 | `dbg-macro` | `dbg!` leaks to stderr in release | (behaviour documented in std) | 1/10 accidental | **note** |
-| `unsafe-without-comment` | unsafe needs a written justification | none possible: this is Rust project policy (std-dev guide; Clippy `undocumented_unsafe_blocks`) | 20/20 lacked one; none shown unsound. Study: OR 1.18 [0.75, 1.87] discovery, 1.92 [1.11, 3.35] replication, neither significant after Holm correction | **note** (consensus) |
+| `unsafe-without-comment` | unsafe needs a written justification | none possible: it is the rule for rustc's and std's own code (std-dev guide) and a Clippy restriction lint (`undocumented_unsafe_blocks`) | 20/20 lacked one; none shown unsound. Study: OR 1.18 [0.75, 1.87] discovery, 1.92 [1.11, 3.35] replication, neither significant after Holm correction | **note** (consensus) |
 
 ## Claims that failed
 

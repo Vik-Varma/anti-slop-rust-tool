@@ -100,11 +100,11 @@ static RULES: &[Rule] = &[
         severity: Severity::Note,
         summary: "Any other `.unwrap()` in shipping code",
         harm: "A failed unwrap panics with a message that names no cause (\"called `Option::unwrap()` \
-               on a `None` value\"), and a panic while a lock is held poisons it for every thread. The \
-               Rust Book accepts unwrap where the code knows more than the compiler, and asks for \
-               `expect` with the reason in production code. Most unwraps in the audit were such \
-               invariants, and the defect study found unwraps don't mark fix-prone functions, so this \
-               is a note, not a warning.",
+               on a `None` value\"), and a panic while a lock is held poisons it for every thread. Where \
+               the code knows more than the compiler, the Rust Book's advice is `expect` with the reason \
+               written out, and it says most Rustaceans choose `expect` over `unwrap` in production code. \
+               Most unwraps in the audit were such invariants, and the defect study found unwraps don't \
+               mark fix-prone functions, so this is a note, not a warning.",
         false_positives: "An invariant the reader can see. Not flagged: tests, examples, build scripts, `const` \
                           code, `lock().unwrap()`, unwraps of literals and of `write!` (formatting into a \
                           `String` can't fail).",
@@ -124,8 +124,9 @@ static RULES: &[Rule] = &[
         summary: "`todo!()` in shipping code",
         harm: "It type-checks as any type, so unfinished code compiles and ships, then panics with \"not \
                yet implemented\" when the path is reached. `unimplemented!()` isn't flagged: the std \
-               docs define it as a statement that the code won't be implemented, and the audit found it \
-               used that way (unsupported backend features, mocks).",
+               docs contrast it with `todo!()`, which \"conveys an intent of implementing the functionality \
+               later\", while `unimplemented!` \"makes no such claims\". In the audit it marked unsupported \
+               backend features and mocks, not unfinished work.",
         false_positives: "None for the panic itself.",
         evidence: Evidence::Demonstrated,
         precision: "validation sample, two raters (docs/AUDIT.md): 4 of 10 reachable; the rest sat on branches nothing can reach, i.e. `todo!()` used as `unreachable!()`",
@@ -174,7 +175,9 @@ static RULES: &[Rule] = &[
         summary: "A `static mut` item",
         harm: "Every access is unsafe and nothing stops two threads, or two references, touching it at once: \
                a data race, which is undefined behaviour. Miri reports a data race on a two-thread counter. \
-               Rust 2024 denies references to it by default (`static_mut_refs`).",
+               Taking a reference to it while it can be written \"has always been instantaneous undefined \
+               behavior, even if the reference is never read from or written to\" (Edition Guide), and \
+               Rust 2024 denies such references by default (`static_mut_refs`).",
         false_positives: "FFI tables a C library writes to (Python module definitions); a cell type or \
                           `&raw mut` access still says that in the code.",
         evidence: Evidence::Demonstrated,
@@ -208,9 +211,10 @@ static RULES: &[Rule] = &[
         severity: Severity::Note,
         summary: "An `unsafe` block or `unsafe impl` with no comment justifying it",
         harm: "`unsafe` moves the proof obligation from the compiler to the author. Without the written \
-               argument a reviewer can't check it, and a later edit can silently break it. This is the \
-               Rust project's own policy, but it is a review practice: the defect study found no \
-               measurable effect, so it is a note.",
+               argument a reviewer can't check it, and a later edit can silently break it. Rust's compiler \
+               and standard library require it of their own code (\"each unsafe block should have a SAFETY: \
+               comment\"), and Clippy offers it as a restriction lint. It is a review practice: the defect \
+               study found no significant effect, so it is a note.",
         false_positives: "A justification further away than the lines just above (e.g. one comment for a \
                           group of `unsafe impl`s).",
         evidence: Evidence::Consensus,
@@ -245,7 +249,9 @@ static RULES: &[Rule] = &[
         harm: "An async task must yield at `.await`; `thread::sleep` parks the whole worker thread instead, \
                stalling every task scheduled on it. Measured on a current-thread runtime: a 5 ms ticker \
                ran 0 times during a 200 ms `thread::sleep`, and kept ticking through `tokio::time::sleep`.",
-        false_positives: "None in async code. Tests, and sync closures (e.g. inside `spawn_blocking`), aren't flagged.",
+        false_positives: "A sleep of a few microseconds does little harm; Tokio's guidance is a rule of thumb \
+                          (no more than 10 to 100 microseconds between `.await`s). Tests, and sync closures \
+                          (e.g. inside `spawn_blocking`), aren't flagged.",
         evidence: Evidence::Demonstrated,
         precision: "no instances outside tests in the corpus; all 10 in tests were deliberate, hence tests are exempt",
         sources: &[

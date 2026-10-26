@@ -145,6 +145,7 @@ impl Analyzer<'_> {
             in_async: sig.asyncness.is_some(),
             in_drop: false,
             in_const: sig.constness.is_some(),
+            returns_result: returns_result(&sig.output),
             function: Some(name),
         }
     }
@@ -200,6 +201,13 @@ fn cfg_only_under_test(meta: &syn::Meta) -> bool {
         }
         syn::Meta::NameValue(_) => false,
     }
+}
+
+fn returns_result(output: &syn::ReturnType) -> bool {
+    let syn::ReturnType::Type(_, ty) = output else {
+        return false;
+    };
+    matches!(ty.as_ref(), syn::Type::Path(p) if p.path.segments.last().is_some_and(|s| s.ident == "Result"))
 }
 
 fn type_name(ty: &syn::Type) -> String {
@@ -290,6 +298,7 @@ impl<'ast> Visit<'ast> for Analyzer<'_> {
     fn visit_expr_async(&mut self, node: &'ast syn::ExprAsync) {
         let scope = Scope {
             in_async: true,
+            returns_result: false,
             ..self.scope().clone()
         };
         self.with_scope(scope, |a| {
@@ -302,9 +311,36 @@ impl<'ast> Visit<'ast> for Analyzer<'_> {
         // A sync closure inside async code runs wherever it's called, often `spawn_blocking`.
         let scope = Scope {
             in_async: node.asyncness.is_some(),
+            returns_result: returns_result(&node.output),
             ..self.scope().clone()
         };
         self.with_scope(scope, |a| visit::visit_expr_closure(a, node));
+    }
+
+    fn visit_expr_if(&mut self, node: &'ast syn::ExprIf) {
+        // `if !thread::panicking() { panic!(..) }` in a destructor is the correct way to do it.
+        if self.scope().in_drop
+            && let Some(guarded_then) = checks::panicking_guard(&node.cond)
+        {
+            // The branch that only runs when the thread isn't already panicking may panic.
+            self.visit_expr(&node.cond);
+            let safe = Scope {
+                in_drop: false,
+                ..self.scope().clone()
+            };
+            let unsafe_branch = self.scope().clone();
+            let (then_scope, else_scope) = if guarded_then {
+                (safe, unsafe_branch)
+            } else {
+                (unsafe_branch, safe)
+            };
+            self.with_scope(then_scope, |a| a.visit_block(&node.then_branch));
+            if let Some((_, e)) = &node.else_branch {
+                self.with_scope(else_scope, |a| a.visit_expr(e));
+            }
+            return;
+        }
+        visit::visit_expr_if(self, node);
     }
 
     fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {

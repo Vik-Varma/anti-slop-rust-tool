@@ -69,7 +69,9 @@ const TEST_FILE_STEMS: &[&str] = &[
 ];
 
 fn is_test_dir(d: &str) -> bool {
-    TEST_DIRS.contains(&d) || TEST_DIR_SUFFIXES.iter().any(|s| d.ends_with(s))
+    TEST_DIRS.contains(&d)
+        || TEST_DIR_SUFFIXES.iter().any(|s| d.ends_with(s))
+        || d.starts_with("xtask-")
 }
 
 /// Where the visitor is right now. Pushed on entering a function, closure, block or module.
@@ -83,6 +85,8 @@ pub struct Scope {
     pub in_drop: bool,
     /// Inside a `const fn` or a `const`/`static` initialiser, where a panic is a compile error.
     pub in_const: bool,
+    /// The enclosing function returns a `Result`, so an error could have been propagated with `?`.
+    pub returns_result: bool,
     /// The enclosing function's display name.
     pub function: Option<String>,
 }

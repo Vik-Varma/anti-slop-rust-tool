@@ -5,28 +5,24 @@ use crate::analyzer::Analyzer;
 /// `lock().unwrap()` throughout, and propagating the poison is the point, so it isn't flagged.
 const POISON_RECEIVERS: &[&str] = &["lock", "read", "write"];
 
-const PANICKING_MACROS: &[&str] = &[
-    "panic",
-    "unreachable",
-    "todo",
-    "unimplemented",
-    "assert",
-    "assert_eq",
-    "assert_ne",
-];
+/// Assertions aren't included: in the audit they checked internal invariants that only fail if the
+/// program is already broken, which is what an assertion is for.
+const PANICKING_MACROS: &[&str] = &["panic", "unreachable", "todo", "unimplemented"];
 
-/// Methods whose `Err`/`None` comes from outside the program: text, bytes, files, the environment.
-const INPUT_METHODS: &[&str] = &[
-    "parse",
-    "decode",
-    "read_to_string",
-    "read_to_end",
-    "read_line",
-    "read_dir",
-    "metadata",
-    "canonicalize",
-    "to_str",
-    "into_string",
+/// Methods whose `Err`/`None` comes from outside the program (text, bytes, files, the
+/// environment), with their argument count so a map's `metadata(id)` isn't taken for
+/// `Path::metadata()`. `None` means any count.
+const INPUT_METHODS: &[(&str, Option<usize>)] = &[
+    ("parse", Some(0)),
+    ("decode", None),
+    ("read_to_string", Some(1)),
+    ("read_to_end", Some(1)),
+    ("read_line", Some(1)),
+    ("read_dir", Some(0)),
+    ("metadata", Some(0)),
+    ("canonicalize", Some(0)),
+    ("to_str", Some(0)),
+    ("into_string", Some(0)),
 ];
 
 /// Functions likewise, by their last two path segments, so a local `open()` isn't mistaken for
@@ -61,7 +57,10 @@ fn input_source(receiver: &syn::Expr) -> Option<String> {
             if matches!(peel(&m.receiver), syn::Expr::Lit(_)) {
                 return None; // `"127.0.0.1".parse()` fails on the first run, not in production
             }
-            if INPUT_METHODS.contains(&name.as_str()) {
+            if INPUT_METHODS
+                .iter()
+                .any(|(n, args)| *n == name && args.is_none_or(|k| k == m.args.len()))
+            {
                 return Some(format!(".{name}()"));
             }
             if matches!(name.as_str(), "output" | "spawn" | "status") && spawns_command(&m.receiver)

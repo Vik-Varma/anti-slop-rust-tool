@@ -110,6 +110,20 @@ pub fn macro_args(mac: &syn::Macro) -> Option<Punctuated<syn::Expr, syn::Token![
         })
 }
 
+/// For `if !thread::panicking()`, `Some(true)`: the then-branch runs only when not unwinding.
+/// For `if thread::panicking()` (or a bare `panicking()` imported from `std::thread`),
+/// `Some(false)`: the else-branch does.
+pub fn panicking_guard(cond: &syn::Expr) -> Option<bool> {
+    let is_panicking_call = |e: &syn::Expr| matches!(peel(e), syn::Expr::Call(c) if call_path(c).is_some_and(|p| path_ends_with(p, &["panicking"])));
+    match peel(cond) {
+        syn::Expr::Unary(u) if matches!(u.op, syn::UnOp::Not(_)) && is_panicking_call(&u.expr) => {
+            Some(true)
+        }
+        e if is_panicking_call(e) => Some(false),
+        _ => None,
+    }
+}
+
 pub fn macro_name(mac: &syn::Macro) -> String {
     mac.path
         .segments

@@ -28,7 +28,9 @@ pub fn call(a: &mut Analyzer, node: &syn::ExprCall) {
 }
 
 pub fn stmt(a: &mut Analyzer, node: &syn::Stmt) {
-    if a.scope().test {
+    // Only where the function could have returned the error: there, dropping it is a choice to
+    // hide it. Elsewhere (a `()` callback, a logging thread) there may be nowhere to send it.
+    if a.scope().test || !a.scope().returns_result {
         return;
     }
     let (discarded, how) = match node {

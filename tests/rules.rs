@@ -66,6 +66,7 @@ fn unwrap_is_fine_outside_shipping_code() {
     check_at("crates/cargo-test-support/src/lib.rs", src);
     check_at("benchmarks/src/routing.rs", src);
     check_at("xtask/src/main.rs", src);
+    check_at("crates/xtask-bump-check/src/main.rs", src);
     check_at("src/test_utils.rs", src);
 }
 
@@ -102,7 +103,16 @@ fn panic_in_drop() {
         impl Drop for A {
             fn drop(&mut self) {
                 self.0.take().unwrap(); //~ panic-in-drop
-                assert!(true); //~ panic-in-drop
+                assert!(true);
+                if !std::thread::panicking() {
+                    panic!("dropped out of order");
+                }
+                if std::thread::panicking() {
+                    eprintln!("closing failed");
+                } else {
+                    panic!("closing failed");
+                }
+                panic!("always"); //~ panic-in-drop
                 let _ = self.0.take();
             }
         }
@@ -234,7 +244,10 @@ fn ignored_io_errors() {
     check(
         r#"
         use std::io::Write;
-        fn a(f: &mut std::fs::File, b: &[u8]) {
+        fn callback(f: &mut std::fs::File, b: &[u8]) {
+            let _ = f.write_all(b);
+        }
+        fn a(f: &mut std::fs::File, b: &[u8]) -> std::io::Result<()> {
             let _ = f.write_all(b); //~ ignored-io-error
             f.flush().ok(); //~ ignored-io-error
             let _ = std::fs::rename("a", "b"); //~ ignored-io-error
@@ -243,6 +256,7 @@ fn ignored_io_errors() {
             let _ = std::io::stdout().flush();
             let _ = stderr.write_all(b);
             f.write_all(b).expect("disk full is fatal here");
+            Ok(())
         }
         fn tx_send() -> Result<(), ()> { Ok(()) }
         "#,
@@ -278,6 +292,8 @@ fn len_truncating_cast() {
         fn c(v: &[u8]) -> u64 { v.len() as u64 }
         fn d(v: &[u8]) -> usize { v.len() as usize }
         fn e(x: u64) -> u32 { x as u32 }
+        #[cfg(test)]
+        mod tests { fn f(v: &[u8]) -> u32 { v.len() as u32 } }
         "#,
     );
 }
@@ -338,6 +354,8 @@ fn panic_on_input() {
         fn i(x: Option<u8>) -> u8 { x.expect("checked by the caller") }
         fn j(s: &mut String) { use std::fmt::Write; write!(s, "{}", 1).unwrap(); }
         fn k(o: &Opener) { o.open().unwrap(); } //~ unwrap
+        fn l(m: &Map) -> u8 { m.metadata(3).unwrap() } //~ unwrap
+        fn n(p: &std::path::Path) -> u64 { p.metadata().unwrap().len() } //~ panic-on-input
         "#,
     );
 }

@@ -82,7 +82,10 @@ pub fn cast(a: &mut Analyzer, node: &syn::ExprCast) {
     let Some(target) = ty.path.get_ident().map(|i| i.to_string()) else {
         return;
     };
-    if !NARROW.contains(&target.as_str()) || is_method(&node.expr, "len", 0).is_none() {
+    if a.scope().test
+        || !NARROW.contains(&target.as_str())
+        || is_method(&node.expr, "len", 0).is_none()
+    {
         return;
     }
     a.emit(

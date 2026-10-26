@@ -77,7 +77,7 @@ static RULES: &[Rule] = &[
     Rule {
         id: "panic-on-input",
         category: Category::Correctness,
-        severity: Severity::Warning,
+        severity: Severity::Note,
         summary: "`.unwrap()`/`.expect()` on parsing, decoding, file, env or socket results",
         harm: "These fail because of something outside the program: a malformed file, a missing \
                variable, a non-UTF-8 path, a refused connection. Unwrapping turns that into a crash \
@@ -85,7 +85,7 @@ static RULES: &[Rule] = &[
                unwrap on the result of loading a generated feature file that had grown past a limit.",
         false_positives: "Input the program wrote itself moments before, or that a previous step validated.",
         evidence: Evidence::Demonstrated,
-        precision: "PENDING",
+        precision: "validation sample (docs/AUDIT.md): 8 of 20 crash on real external input (non-UTF-8 paths and arguments, env vars, dump files, process output); the rest were validated data or dev tooling",
         sources: &[
             BOOK_PANIC,
             "Cloudflare, 18 November 2025 outage: https://blog.cloudflare.com/18-november-2025-outage/",
@@ -107,7 +107,7 @@ static RULES: &[Rule] = &[
                           code, `lock().unwrap()`, unwraps of literals and of `write!` (formatting into a \
                           `String` can't fail).",
         evidence: Evidence::Demonstrated,
-        precision: "PENDING",
+        precision: "validation sample (docs/AUDIT.md): 2 of 20 on fallible operations; 15 asserted invariants the code maintains; 3 in dev-only binaries",
         sources: &[
             BOOK_PANIC,
             "Clippy unwrap_used (restriction): https://rust-lang.github.io/rust-clippy/master/index.html#unwrap_used",
@@ -125,7 +125,7 @@ static RULES: &[Rule] = &[
                used that way (unsupported backend features, mocks).",
         false_positives: "None for the panic itself.",
         evidence: Evidence::Demonstrated,
-        precision: "PENDING",
+        precision: "validation sample (docs/AUDIT.md): 10 of 10 unfinished paths reachable in shipping code",
         sources: &[
             "std::todo: https://doc.rust-lang.org/std/macro.todo.html",
             "experiments/tests/panics.rs: todo_compiles_and_panics_at_runtime",
@@ -141,7 +141,7 @@ static RULES: &[Rule] = &[
                mostly used on purpose, behind a debug flag, so this is a note.",
         false_positives: "Deliberate debug output, e.g. gated on an environment variable.",
         evidence: Evidence::Demonstrated,
-        precision: "PENDING",
+        precision: "first audit: 1 of 10 accidental; 9 deliberate debug output behind a flag",
         sources: &[
             "std::dbg: https://doc.rust-lang.org/std/macro.dbg.html",
             "Clippy dbg_macro (restriction): https://rust-lang.github.io/rust-clippy/master/index.html#dbg_macro",
@@ -150,14 +150,14 @@ static RULES: &[Rule] = &[
     Rule {
         id: "panic-in-drop",
         category: Category::Correctness,
-        severity: Severity::Warning,
+        severity: Severity::Note,
         summary: "A panic (`unwrap`, `expect`, `panic!`, `assert!`) inside `Drop::drop`",
         harm: "Destructors run during unwinding. A panic in one while another panic unwinds aborts the whole \
                process: `catch_unwind` never gets control and no other destructor runs. Verified: SIGABRT \
                with \"panic in a destructor during cleanup\".",
         false_positives: "An assertion of an internal invariant that only fails if the program is already broken.",
         evidence: Evidence::Demonstrated,
-        precision: "PENDING",
+        precision: "validation sample (docs/AUDIT.md): 3 of 10 on fallible operations (a poisoned lock, a syscall); 7 asserted internal invariants or were deliberate",
         sources: &[
             API_DTOR,
             "std::ops::Drop, panics: https://doc.rust-lang.org/std/ops/trait.Drop.html",
@@ -167,7 +167,7 @@ static RULES: &[Rule] = &[
     Rule {
         id: "static-mut",
         category: Category::Correctness,
-        severity: Severity::Warning,
+        severity: Severity::Note,
         summary: "A `static mut` item",
         harm: "Every access is unsafe and nothing stops two threads, or two references, touching it at once: \
                a data race, which is undefined behaviour. Miri reports a data race on a two-thread counter. \
@@ -175,7 +175,7 @@ static RULES: &[Rule] = &[
         false_positives: "FFI tables a C library writes to (Python module definitions); a cell type or \
                           `&raw mut` access still says that in the code.",
         evidence: Evidence::Demonstrated,
-        precision: "PENDING",
+        precision: "10 of 10 deliberate (Python FFI tables, an atomic-guarded global); no data race found",
         sources: &[
             "Edition Guide, static mut references: https://doc.rust-lang.org/edition-guide/rust-2024/static-mut-references.html",
             "experiments/miri: bad_static_mut_race (UB) vs good_atomic_counter (clean)",
@@ -211,7 +211,7 @@ static RULES: &[Rule] = &[
         false_positives: "A justification further away than the lines just above (e.g. one comment for a \
                           group of `unsafe impl`s).",
         evidence: Evidence::Consensus,
-        precision: "PENDING",
+        precision: "20 of 20 had no justification nearby; none was shown to be unsound",
         sources: &[
             "Clippy undocumented_unsafe_blocks (restriction): https://rust-lang.github.io/rust-clippy/master/index.html#undocumented_unsafe_blocks",
             "Standard library dev guide, safety comments: https://std-dev-guide.rust-lang.org/policy/safety-comments.html",
@@ -227,7 +227,7 @@ static RULES: &[Rule] = &[
                on a current-thread Tokio runtime; the same code with `tokio::sync::Mutex` finishes.",
         false_positives: "A `lock()` method on a type that isn't a lock. Guards moved elsewhere aren't tracked.",
         evidence: Evidence::Demonstrated,
-        precision: "PENDING",
+        precision: "7 of 7 (all instances) hold a std or terminal lock guard across an `.await`; 6 are in tests",
         sources: &[
             "Clippy await_holding_lock (suspicious): https://rust-lang.github.io/rust-clippy/master/index.html#await_holding_lock",
             "Tokio Mutex docs, which mutex to use: https://docs.rs/tokio/latest/tokio/sync/struct.Mutex.html",
@@ -244,7 +244,7 @@ static RULES: &[Rule] = &[
                sleep; with `tokio::time::sleep` it kept time.",
         false_positives: "None in async code. Tests, and sync closures (e.g. inside `spawn_blocking`), aren't flagged.",
         evidence: Evidence::Demonstrated,
-        precision: "PENDING",
+        precision: "no instances outside tests in the corpus; all 10 in tests were deliberate, hence tests are exempt",
         sources: &[
             "Tokio, spawn_blocking: https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html",
             "Alice Ryhl (Tokio maintainer), Async: What is blocking?: https://ryhl.io/blog/async-what-is-blocking/",
@@ -254,7 +254,7 @@ static RULES: &[Rule] = &[
     Rule {
         id: "ignored-io-error",
         category: Category::ErrorHandling,
-        severity: Severity::Warning,
+        severity: Severity::Note,
         summary: "`let _ =` or `.ok();` on a write, flush, sync, rename or copy",
         harm: "The error is the only signal that data didn't reach disk. Verified: on a full device \
                `write_all` fails with ENOSPC and the caller reports success. Yuan et al. (OSDI '14) found \
@@ -262,7 +262,7 @@ static RULES: &[Rule] = &[
         false_positives: "Best-effort writes where loss is acceptable. Writes to stdout/stderr and removals \
                           aren't flagged.",
         evidence: Evidence::Demonstrated,
-        precision: "PENDING",
+        precision: "validation sample (docs/AUDIT.md): 4 of 10 hid a failed flush or write from a caller expecting an error; 6 were best-effort writes on an error path or during shutdown",
         sources: &[
             "CWE-252 Unchecked Return Value: https://cwe.mitre.org/data/definitions/252.html",
             "Yuan et al., Simple Testing Can Prevent Most Critical Failures, OSDI 2014: https://www.usenix.org/conference/osdi14/technical-sessions/presentation/yuan",
@@ -281,7 +281,7 @@ static RULES: &[Rule] = &[
                no `lib.rs`) aren't flagged.",
         false_positives: "A library that is really a CLI's internals, exiting before any buffered state exists.",
         evidence: Evidence::Demonstrated,
-        precision: "PENDING",
+        precision: "10 of 10 a library crate exiting for its caller; none lost data (all CLI paths before any buffered state)",
         sources: &[
             "std::process::exit: https://doc.rust-lang.org/std/process/fn.exit.html",
             "experiments/tests/io.rs: process_exit_skips_destructors",
@@ -313,7 +313,7 @@ static RULES: &[Rule] = &[
                render targets), so this is a note.",
         false_positives: "Lengths bounded by construction. `try_from` documents and checks it.",
         evidence: Evidence::Demonstrated,
-        precision: "PENDING",
+        precision: "first audit: 0 of 20 shown reachable; lengths were bounded by their domain",
         sources: &[
             "Rust Reference, numeric cast semantics: https://doc.rust-lang.org/reference/expressions/operator-expr.html#numeric-cast",
             "CWE-197 Numeric Truncation Error: https://cwe.mitre.org/data/definitions/197.html",
@@ -331,7 +331,7 @@ static RULES: &[Rule] = &[
         false_positives: "None; `RUSTFLAGS=-D warnings` in CI gives the strictness without the breakage. \
                           Examples, tests and benches aren't flagged.",
         evidence: Evidence::Demonstrated,
-        precision: "PENDING",
+        precision: "no instances in shipping crate roots; all 31 were in examples, tests or benches, which are exempt",
         sources: &[
             "Rust Design Patterns, #![deny(warnings)] anti-pattern: https://rust-unofficial.github.io/patterns/anti_patterns/deny-warnings.html",
             "RFC 1105, API evolution (new lints are minor changes): https://rust-lang.github.io/rfcs/1105-api-evolution.html",

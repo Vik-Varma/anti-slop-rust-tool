@@ -8,6 +8,7 @@
 mod analyzer;
 mod checks;
 mod context;
+mod features;
 mod finding;
 pub mod metrics;
 pub mod rules;
@@ -16,5 +17,6 @@ mod walk;
 
 pub use analyzer::{FileReport, analyze_source};
 pub use context::FileKind;
+pub use features::Features;
 pub use finding::{Finding, Severity};
 pub use walk::{AnalyzeError, analyze_paths, rust_files};

@@ -1,0 +1,12 @@
+# Experiments that check each rule's claimed failure actually happens. Not part of the tool: a
+# separate workspace, so the tool itself keeps its two dependencies.
+[package]
+name = "anti-slop-experiments"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "time", "macros", "sync"] }

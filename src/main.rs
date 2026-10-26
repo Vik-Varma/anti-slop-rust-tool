@@ -210,103 +210,82 @@ fn write_json(out: &mut impl Write, findings: &[&Finding]) -> io::Result<()> {
     writeln!(out, "]")
 }
 
+/// One row per function: its metrics, the candidate-pattern counts and the findings inside it.
+fn function_rows(path: &str, report: &anti_slop::FileReport) -> Vec<Vec<(String, String)>> {
+    let mut rows = Vec::new();
+    for m in &report.functions {
+        let f = &m.features;
+        let mut row: Vec<(String, String)> = vec![
+            ("path".into(), json_str(path)),
+            ("function".into(), json_str(&m.name)),
+        ];
+        let numbers = [
+            ("start", m.start_line),
+            ("end", m.end_line),
+            ("code_lines", m.code_lines),
+            ("cyclomatic", m.cyclomatic),
+            ("cognitive", m.cognitive),
+            ("max_nesting", m.max_nesting),
+            ("params", m.params),
+            ("try_ops", m.try_ops),
+            ("test", usize::from(m.test)),
+            ("f_clones", f.clones),
+            ("f_expects", f.expects),
+            ("f_panics", f.panics),
+            ("f_as_casts", f.as_casts),
+            ("f_magic_numbers", f.magic_numbers),
+            ("f_unsafe_blocks", f.unsafe_blocks),
+            ("f_bool_params", f.bool_params),
+            ("f_debt_comments", f.debt_comments),
+            ("f_comment_lines", f.comment_lines),
+        ];
+        row.extend(numbers.iter().map(|(k, v)| (k.to_string(), v.to_string())));
+        for r in rules::all() {
+            let n = report
+                .findings
+                .iter()
+                .filter(|x| x.rule == r.id && x.line >= m.start_line && x.line <= m.end_line)
+                .count();
+            row.push((r.id.to_string(), n.to_string()));
+        }
+        rows.push(row);
+    }
+    rows
+}
+
 fn metrics(o: &Options) -> Result<ExitCode, String> {
     let (reports, errors) = analyze_paths(&o.paths);
-    let ids: Vec<&str> = rules::all().iter().map(|r| r.id).collect();
-    let mut out = io::stdout().lock();
-    let header = [
-        "path",
-        "function",
-        "start",
-        "end",
-        "code_lines",
-        "cyclomatic",
-        "cognitive",
-        "max_nesting",
-        "params",
-        "try_ops",
-        "test",
-    ];
     let csv = o.format != "json";
-    if csv {
-        writeln!(out, "{},{}", header.join(","), ids.join(",")).map_err(|e| e.to_string())?;
-    }
+    let mut out = io::stdout().lock();
     let mut first = true;
-    if !csv {
-        writeln!(out, "[").map_err(|e| e.to_string())?;
-    }
-    for (path, report) in &reports {
-        for m in &report.functions {
-            let counts: Vec<usize> = ids
-                .iter()
-                .map(|id| {
-                    report
-                        .findings
-                        .iter()
-                        .filter(|f| f.rule == *id && f.line >= m.start_line && f.line <= m.end_line)
-                        .count()
-                })
-                .collect();
-            let p = path.to_string_lossy();
-            let line = if csv {
-                let counts: Vec<String> = counts.iter().map(usize::to_string).collect();
-                format!(
-                    "{},{},{},{},{},{},{},{},{},{},{},{}",
-                    json_str(&p),
-                    json_str(&m.name),
-                    m.start_line,
-                    m.end_line,
-                    m.code_lines,
-                    m.cyclomatic,
-                    m.cognitive,
-                    m.max_nesting,
-                    m.params,
-                    m.try_ops,
-                    u8::from(m.test),
-                    counts.join(",")
-                )
-            } else {
-                let counts: Vec<String> = ids
-                    .iter()
-                    .zip(&counts)
-                    .filter(|(_, n)| **n > 0)
-                    .map(|(id, n)| format!("{}: {n}", json_str(id)))
-                    .collect();
-                format!(
-                    "{}  {{\"path\": {}, \"function\": {}, \"start\": {}, \"end\": {}, \"code_lines\": {}, \"cyclomatic\": {}, \"cognitive\": {}, \"max_nesting\": {}, \"params\": {}, \"try_ops\": {}, \"test\": {}, \"findings\": {{{}}}}}",
-                    if first { "" } else { ",\n" },
-                    json_str(&p),
-                    json_str(&m.name),
-                    m.start_line,
-                    m.end_line,
-                    m.code_lines,
-                    m.cyclomatic,
-                    m.cognitive,
-                    m.max_nesting,
-                    m.params,
-                    m.try_ops,
-                    m.test,
-                    counts.join(", ")
-                )
-            };
-            first = false;
-            if csv {
-                writeln!(out, "{line}")
-            } else {
-                write!(out, "{line}")
-            }
-            .map_err(|e| e.to_string())?;
+    let mut write_all = || -> io::Result<()> {
+        if !csv {
+            writeln!(out, "[")?;
         }
-    }
-    if !csv {
-        writeln!(out, "\n]").map_err(|e| e.to_string())?;
-    }
+        for (path, report) in &reports {
+            for row in function_rows(&path.to_string_lossy(), report) {
+                if csv {
+                    if first {
+                        let names: Vec<&str> = row.iter().map(|(k, _)| k.as_str()).collect();
+                        writeln!(out, "{}", names.join(","))?;
+                    }
+                    let values: Vec<&str> = row.iter().map(|(_, v)| v.as_str()).collect();
+                    writeln!(out, "{}", values.join(","))?;
+                } else {
+                    let fields: Vec<String> = row.iter().map(|(k, v)| format!("{}: {v}", json_str(k))).collect();
+                    write!(out, "{}  {{{}}}", if first { "" } else { ",\n" }, fields.join(", "))?;
+                }
+                first = false;
+            }
+        }
+        if !csv {
+            writeln!(out, "\n]")?;
+        }
+        Ok(())
+    };
+    write_all().map_err(|e| e.to_string())?;
     for e in &errors {
         eprintln!("anti-slop: {e}");
     }
-    Ok(if errors.is_empty() {
-        ExitCode::SUCCESS
-    } else {
-        ExitCode::from(2)
-    })
+    Ok(if errors.is_empty() { ExitCode::SUCCESS } else { ExitCode::from(2) })
 }

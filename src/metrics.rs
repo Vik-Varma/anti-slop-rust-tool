@@ -21,6 +21,7 @@ pub struct FunctionMetrics {
     /// `?` operators: hidden early returns, kept apart from `cyclomatic` so it matches McCabe.
     pub try_ops: usize,
     pub test: bool,
+    pub features: crate::features::Features,
 }
 
 pub fn measure(
@@ -50,6 +51,7 @@ pub fn measure(
         params,
         try_ops: c.try_ops,
         test,
+        features: crate::features::count(sig, block, lines, start_line, end_line),
     }
 }
 

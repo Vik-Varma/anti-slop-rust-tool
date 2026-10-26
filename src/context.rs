@@ -15,7 +15,7 @@ pub enum FileKind {
 impl FileKind {
     pub fn of(path: &Path) -> FileKind {
         let parts: Vec<&str> = path.iter().filter_map(|p| p.to_str()).collect();
-        let has = |name: &str| parts.iter().any(|p| *p == name);
+        let has = |name: &str| parts.contains(&name);
         let file = parts.last().copied().unwrap_or_default();
         if file == "build.rs" {
             FileKind::BuildScript

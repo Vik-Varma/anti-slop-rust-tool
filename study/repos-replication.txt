@@ -1,0 +1,15 @@
+actix/actix-web
+rwf2/Rocket
+diesel-rs/diesel
+quickwit-oss/tantivy
+typst/typst
+casey/just
+eza-community/eza
+dandavison/delta
+getzola/zola
+rust-lang/mdBook
+rust-lang/rustup
+meilisearch/meilisearch
+tauri-apps/tauri
+image-rs/image
+GitoxideLabs/gitoxide

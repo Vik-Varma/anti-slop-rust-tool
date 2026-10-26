@@ -1,0 +1,9 @@
+# Programs Miri judges. `run.sh` expects the bad ones to be reported as undefined behaviour and
+# the controls to run clean.
+[package]
+name = "anti-slop-miri"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]

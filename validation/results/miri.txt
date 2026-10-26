@@ -1,0 +1,10 @@
+set_len_uninit         expected ub    got ub    ok
+    error: Undefined Behavior: reading memory at alloc308[0x0..0x1], but memory is uninitialized at [0x0..0x1], and this operation requires initialized memory
+set_len_fixed          expected clean got clean ok
+uninit_assume_init     expected ub    got ub    ok
+    error: Undefined Behavior: constructing invalid value of type u32: encountered uninitialized memory, but expected an integer
+uninit_fixed           expected clean got clean ok
+send_race              expected ub    got ub    ok
+    error: Undefined Behavior: Data race detected between (1) non-atomic write on thread `main` and (2) non-atomic read on thread `unnamed-1` at alloc295
+send_bounded           expected clean got clean ok
+

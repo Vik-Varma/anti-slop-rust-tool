@@ -31,6 +31,8 @@ pub struct FnMetrics {
     pub cognitive: usize,
     /// Deepest nesting of control-flow constructs.
     pub max_nesting: usize,
+    /// Number of `unsafe { }` blocks in the body.
+    pub unsafe_blocks: usize,
     pub is_test: bool,
     pub is_async: bool,
     pub is_unsafe: bool,
@@ -87,6 +89,7 @@ impl FnCollector<'_, '_> {
             cyclomatic: cx.cyclomatic,
             cognitive: cx.cognitive,
             max_nesting: cx.max_nesting,
+            unsafe_blocks: cx.unsafe_blocks,
             is_test: has_test_attr(attrs) || self.ctx.in_test(line),
             is_async: sig.asyncness.is_some(),
             is_unsafe: sig.unsafety.is_some(),
@@ -187,12 +190,13 @@ pub struct Complexity {
     pub cyclomatic: usize,
     pub cognitive: usize,
     pub max_nesting: usize,
+    pub unsafe_blocks: usize,
     nesting: usize,
 }
 
 impl Complexity {
     pub fn new(fn_name: String) -> Self {
-        Complexity { fn_name, cyclomatic: 1, cognitive: 0, max_nesting: 0, nesting: 0 }
+        Complexity { fn_name, cyclomatic: 1, cognitive: 0, max_nesting: 0, unsafe_blocks: 0, nesting: 0 }
     }
 
     fn nested<F: FnOnce(&mut Self)>(&mut self, f: F) {
@@ -303,6 +307,11 @@ impl<'ast> Visit<'ast> for Complexity {
 
     fn visit_expr_closure(&mut self, c: &'ast syn::ExprClosure) {
         self.nested(|s| s.visit_expr(&c.body));
+    }
+
+    fn visit_expr_unsafe(&mut self, u: &'ast syn::ExprUnsafe) {
+        self.unsafe_blocks += 1;
+        visit::visit_expr_unsafe(self, u);
     }
 
     fn visit_expr_break(&mut self, b: &'ast syn::ExprBreak) {

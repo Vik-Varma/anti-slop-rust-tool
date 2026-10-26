@@ -1,0 +1,16 @@
+test child_panic_in_drop ... ignored
+test child_process_exit ... ignored
+test ignored_write_count_loses_data ... ok
+test float_literal_equality_fails ... ok
+test panic_in_drop_during_unwind_aborts ... ok
+test process_exit_skips_destructors ... ok
+test deny_warnings_breaks_build_when_a_dependency_deprecates_something ... ok
+test todo_panics_when_reached ... ok
+test unbounded_send_impl_makes_rc_sendable ... ok
+test unwrap_in_result_fn_crashes_instead_of_returning_err ... ok
+10ms timer fired after 301.662954ms with std::thread::sleep, 11.159858ms with tokio::time::sleep
+test blocking_sleep_stalls_other_tasks ... ok
+lock in scrutinee: deadlocked
+test lock_in_match_scrutinee_deadlocks ... ok
+test std_guard_across_await_deadlocks ... ok
+test result: ok. 11 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 2.16s

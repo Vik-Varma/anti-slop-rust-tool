@@ -192,7 +192,7 @@ def mine_repo(args_tuple):
 
         out_path = os.path.join(out_dir, f"{name}.csv")
         base_cols = ["repo", "file", "file_kind", "qual_name", "line", "loc", "params", "bool_params",
-                     "cyclomatic", "cognitive", "max_nesting", "is_test", "is_async", "is_unsafe",
+                     "cyclomatic", "cognitive", "max_nesting", "unsafe_blocks", "is_test", "is_async", "is_unsafe",
                      "is_trait_impl", "changes", "fixes"]
         with open(out_path, "w", newline="") as fh:
             w = csv.writer(fh)
@@ -204,7 +204,7 @@ def mine_repo(args_tuple):
                         continue  # ambiguous identity (cfg variants etc.)
                     key = (rel, f["qual_name"])
                     w.writerow([name, rel, f["file_kind"], f["qual_name"], f["line"], f["loc"], f["params"],
-                                f["bool_params"], f["cyclomatic"], f["cognitive"], f["max_nesting"],
+                                f["bool_params"], f["cyclomatic"], f["cognitive"], f["max_nesting"], f["unsafe_blocks"],
                                 int(f["is_test"]), int(f["is_async"]), int(f["is_unsafe"]),
                                 int(f["is_trait_impl"]), changes[key], fixes[key]]
                                + [findings[key][r] for r in rules_seen])

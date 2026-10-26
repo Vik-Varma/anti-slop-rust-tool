@@ -1,0 +1,15 @@
+[package]
+name = "anti-slop-benches"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Standalone: not part of the anti-slop workspace.
+[workspace]
+
+[dev-dependencies]
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "patterns"
+harness = false

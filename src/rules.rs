@@ -243,8 +243,8 @@ static RULES: &[Rule] = &[
         severity: Severity::Warning,
         summary: "`thread::sleep` inside async code",
         harm: "An async task must yield at `.await`; `thread::sleep` parks the whole worker thread instead, \
-               stalling every task scheduled on it. Measured: a 10 ms ticker stalled for the full 100 ms \
-               sleep; with `tokio::time::sleep` it kept time.",
+               stalling every task scheduled on it. Measured on a current-thread runtime: a 5 ms ticker \
+               ran 0 times during a 200 ms `thread::sleep`, and kept ticking through `tokio::time::sleep`.",
         false_positives: "None in async code. Tests, and sync closures (e.g. inside `spawn_blocking`), aren't flagged.",
         evidence: Evidence::Demonstrated,
         precision: "no instances outside tests in the corpus; all 10 in tests were deliberate, hence tests are exempt",

@@ -53,6 +53,10 @@ fn panic_in_drop_during_unwind_aborts() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(!stdout.contains("caught"), "catch_unwind never got control");
+    assert!(!out.status.success(), "the process died instead of finishing: {:?}", out.status);
+    assert!(stderr.contains("called `Option::unwrap()` on a `None` value"), "the second panic ran: {stderr}");
+    // Unix std names the abort; Windows unwinds through SEH and fails fast without the line.
+    #[cfg(not(windows))]
     assert!(stderr.contains("panic in a destructor during cleanup"), "{stderr}");
     #[cfg(unix)]
     {

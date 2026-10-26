@@ -1,43 +1,40 @@
 //! `blocking-sleep-in-async`, `lock-held-across-await`.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// On a single-threaded runtime, `thread::sleep` in one task stops every other task: a ticker
-/// that should run every 10 ms waits for the whole sleep.
+/// that should tick every 5 ms gets no ticks at all in while the sleep runs. Counting ticks, rather
+/// than timing them, keeps the result independent of how noisy the machine is.
 #[test]
 fn blocking_sleep_stalls_other_tasks() {
-    fn worst_tick_gap(blocking: bool) -> Duration {
+    fn ticks_during_sleep(blocking: bool) -> usize {
         let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().expect("runtime");
         rt.block_on(async move {
-            let ticker = tokio::spawn(async {
-                let mut worst = Duration::ZERO;
-                let mut last = Instant::now();
-                for _ in 0..20 {
-                    tokio::time::sleep(Duration::from_millis(10)).await;
-                    worst = worst.max(last.elapsed());
-                    last = Instant::now();
-                }
-                worst
-            });
-            let sleeper = tokio::spawn(async move {
-                for _ in 0..2 {
-                    if blocking {
-                        std::thread::sleep(Duration::from_millis(100));
-                    } else {
-                        tokio::time::sleep(Duration::from_millis(100)).await;
-                    }
-                    tokio::task::yield_now().await;
+            let ticks = Arc::new(AtomicUsize::new(0));
+            let t = ticks.clone();
+            let ticker = tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                    t.fetch_add(1, Ordering::SeqCst);
                 }
             });
-            sleeper.await.expect("sleeper");
-            ticker.await.expect("ticker")
+            // Let the ticker start before measuring.
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            let before = ticks.load(Ordering::SeqCst);
+            if blocking {
+                std::thread::sleep(Duration::from_millis(200));
+            } else {
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+            let during = ticks.load(Ordering::SeqCst) - before;
+            ticker.abort();
+            during
         })
     }
-    let blocked = worst_tick_gap(true);
-    let fine = worst_tick_gap(false);
-    assert!(blocked >= Duration::from_millis(95), "ticker stalled for {blocked:?}");
-    assert!(fine < Duration::from_millis(60), "async sleep let the ticker run: {fine:?}");
+    assert_eq!(ticks_during_sleep(true), 0, "no other task ran while the thread slept");
+    assert!(ticks_during_sleep(false) > 0, "with an async sleep the ticker kept running");
 }
 
 /// A std `Mutex` guard held across `.await`: while the holder is suspended, a second future on

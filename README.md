@@ -57,7 +57,7 @@ Shown by default:
 | `uninit-memory` | error | `mem::uninitialized()`, `MaybeUninit::uninit().assume_init()` | Miri reports UB |
 | `lock-held-across-await` | error | a std/parking_lot guard alive at an `.await` | deadlock reproduced; 7/7 in the audit |
 | `todo` | warning | `todo!()` in shipping code | 10/10 real in the audit |
-| `blocking-sleep-in-async` | warning | `thread::sleep` in async code | 10 ms ticker stalled 100 ms |
+| `blocking-sleep-in-async` | warning | `thread::sleep` in async code | other tasks get 0 turns during the sleep |
 | `float-eq-inexact` | warning | `x == 0.1` (literals with no exact binary value) | `0.1 + 0.2 != 0.3`; exact literals are left alone |
 | `deny-warnings` | warning | `#![deny(warnings)]` in a crate root | builds on Rust 1.76, fails on 1.99 |
 

@@ -1,7 +1,11 @@
 //! `ignored-io-error`, `unused-io-amount`, `process-exit-in-library`.
 
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufWriter, Write};
+use std::fs;
+#[cfg(target_os = "linux")]
+use std::fs::{File, OpenOptions};
+#[cfg(target_os = "linux")]
+use std::io::BufWriter;
+use std::io::{self, Write};
 
 use anti_slop_experiments::run_helper;
 

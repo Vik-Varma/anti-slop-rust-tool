@@ -13,8 +13,11 @@ pub struct FnMetrics {
     pub name: String,
     /// `module::Type::name` style path within the file.
     pub qual_name: String,
+    /// Line of the function name.
     pub line: usize,
     pub column: usize,
+    /// First line of the function including its (non-doc) attributes.
+    pub start_line: usize,
     pub end_line: usize,
     /// Lines in the function that contain code (excludes blank and comment-only lines).
     pub loc: usize,
@@ -74,6 +77,7 @@ impl FnCollector<'_, '_> {
             qual_name: qual.join("::"),
             line,
             column: sig.ident.span().start().column + 1,
+            start_line: start,
             end_line: end,
             loc,
             params,

@@ -81,7 +81,7 @@ pub fn analyze_source(
     let input = Input { ctx: &ctx, fns: &fns, config };
     let mut findings = Vec::new();
     for rule in rules {
-        if !config.rule_enabled(rule.meta().id) {
+        if !config.rule_enabled(rule.meta()) {
             continue;
         }
         let mut sink = Sink::new(&ctx, rule.meta());
@@ -89,7 +89,7 @@ pub fn analyze_source(
         findings.append(&mut sink.findings);
     }
     findings.sort_by_key(|f| (f.line, f.column, f.rule));
-    let tokens = if config.rule_enabled(crate::duplicates::META.id) {
+    let tokens = if config.rule_enabled(&crate::duplicates::META) {
         crate::duplicates::tokens(&ctx)
     } else {
         Vec::new()

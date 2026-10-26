@@ -21,6 +21,7 @@ pub static META: RuleMeta = RuleMeta {
     category: Category::Maintainability,
     severity: Severity::Warning,
     evidence: Evidence::Moderate,
+    default_enabled: true,
     summary: "Long block of code duplicated elsewhere in the project",
     rationale: "Copy-pasted code must be changed consistently; when a fix is applied to one copy \
 and not the others, the bug survives. Juergens et al. (ICSE 2009) found that inconsistently \
@@ -119,7 +120,7 @@ fn is_varied(toks: &[Tok]) -> bool {
 }
 
 pub fn check(reports: &mut [FileReport], _files: &[PathBuf], config: &Config) {
-    if !config.rule_enabled(META.id) {
+    if !config.rule_enabled(&META) {
         return;
     }
     let w = config.min_duplicate_tokens.max(10);

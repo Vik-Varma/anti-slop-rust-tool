@@ -1,3 +1,4 @@
+use crate::rules::RuleMeta;
 use serde::Deserialize;
 use std::path::Path;
 
@@ -19,6 +20,10 @@ pub struct Config {
     pub min_duplicate_tokens: usize,
     /// Rule ids to disable.
     pub disable: Vec<String>,
+    /// Opt-in rule ids to enable in addition to the defaults.
+    pub enable: Vec<String>,
+    /// Run every rule, including opt-in ones.
+    pub all_rules: bool,
     /// If non-empty, only these rule ids run.
     pub only: Vec<String>,
 }
@@ -32,6 +37,8 @@ impl Default for Config {
             max_params: 7,
             min_duplicate_tokens: 120,
             disable: Vec::new(),
+            enable: Vec::new(),
+            all_rules: false,
             only: Vec::new(),
         }
     }
@@ -43,7 +50,14 @@ impl Config {
         toml::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))
     }
 
-    pub fn rule_enabled(&self, id: &str) -> bool {
-        (self.only.is_empty() || self.only.iter().any(|r| r == id)) && !self.disable.iter().any(|r| r == id)
+    pub fn rule_enabled(&self, meta: &RuleMeta) -> bool {
+        let named = |list: &[String]| list.iter().any(|r| r == meta.id);
+        if named(&self.disable) {
+            return false;
+        }
+        if !self.only.is_empty() {
+            return named(&self.only);
+        }
+        meta.default_enabled || self.all_rules || named(&self.enable)
     }
 }

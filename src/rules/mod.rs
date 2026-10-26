@@ -11,6 +11,8 @@ pub struct RuleMeta {
     pub category: Category,
     pub severity: Severity,
     pub evidence: Evidence,
+    /// Opt-in rules only run with `--all-rules` or when named in `--only`.
+    pub default_enabled: bool,
     /// One-line description of what is flagged.
     pub summary: &'static str,
     /// Why it is bad, what the evidence says, and when it is acceptable.
@@ -43,6 +45,11 @@ impl<'c, 'a> Sink<'c, 'a> {
         Sink { ctx, meta, findings: Vec::new() }
     }
 
+    /// The file being checked (with the sink's own lifetimes, so visitors can hold both).
+    pub fn ctx(&self) -> &'c FileContext<'a> {
+        self.ctx
+    }
+
     pub fn emit(&mut self, line: usize, column: usize, message: impl Into<String>) {
         if self.ctx.is_suppressed(self.meta.id, line) {
             return;
@@ -64,8 +71,31 @@ impl<'c, 'a> Sink<'c, 'a> {
     }
 }
 
+mod complexity;
+mod errors;
+mod panics;
+
+#[cfg(test)]
+pub mod testing;
+
 pub fn all_rules() -> Vec<Box<dyn Rule>> {
-    vec![]
+    vec![
+        Box::new(panics::TodoInProduction),
+        Box::new(panics::UnwrapInResultFn),
+        Box::new(panics::UnwrapUsed),
+        Box::new(panics::DbgMacro),
+        Box::new(panics::PanicInDrop),
+        Box::new(panics::ExitInLibrary),
+        Box::new(errors::SwallowedError),
+        Box::new(errors::UnusedIoAmount),
+        Box::new(errors::UnitErrorType),
+        Box::new(complexity::CognitiveComplexity),
+        Box::new(complexity::DeepNesting),
+        Box::new(complexity::LongFunction),
+        Box::new(complexity::TooManyParams),
+        Box::new(complexity::BoolParams),
+        Box::new(crate::duplicates::DuplicateCode),
+    ]
 }
 
 pub fn find(id: &str) -> Option<Box<dyn Rule>> {

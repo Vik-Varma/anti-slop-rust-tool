@@ -1,5 +1,6 @@
 use anti_slop::analyze::{self, FileReport};
 use anti_slop::config::Config;
+use anti_slop::context::FileKind;
 use anti_slop::finding::Severity;
 use anti_slop::rules;
 use clap::{Parser, Subcommand, ValueEnum};
@@ -30,6 +31,12 @@ enum Command {
         /// Disable these rules (comma separated).
         #[arg(long, value_delimiter = ',')]
         disable: Vec<String>,
+        /// Enable these opt-in rules (comma separated).
+        #[arg(long, value_delimiter = ',')]
+        enable: Vec<String>,
+        /// Run all rules, including opt-in ones.
+        #[arg(long)]
+        all_rules: bool,
         /// Hide findings below this severity.
         #[arg(long, default_value = "info")]
         min_severity: Severity,
@@ -60,7 +67,7 @@ fn default_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
-        Command::Check { paths, format, config, only, disable, min_severity, fail_on } => {
+        Command::Check { paths, format, config, only, disable, enable, all_rules, min_severity, fail_on } => {
             let mut cfg = match load_config(config) {
                 Ok(c) => c,
                 Err(e) => {
@@ -70,7 +77,9 @@ fn main() -> ExitCode {
             };
             cfg.only.extend(only);
             cfg.disable.extend(disable);
-            for id in cfg.only.iter().chain(&cfg.disable) {
+            cfg.enable.extend(enable);
+            cfg.all_rules |= all_rules;
+            for id in cfg.only.iter().chain(&cfg.disable).chain(&cfg.enable) {
                 if rules::find(id).is_none() {
                     eprintln!("error: unknown rule `{id}` (see `anti-slop rules`)");
                     return ExitCode::from(2);
@@ -98,9 +107,11 @@ fn main() -> ExitCode {
                 if let Some(e) = &r.parse_error {
                     eprintln!("{}: parse error: {e}", r.file.display());
                 }
+                let kind = FileKind::from_path(&analyze::crate_relative(&r.file));
                 for f in &r.functions {
                     let mut v = serde_json::to_value(f).expect("FnMetrics serialises");
                     v["file"] = serde_json::Value::String(r.file.display().to_string());
+                    v["file_kind"] = serde_json::Value::String(format!("{kind:?}").to_lowercase());
                     println!("{v}");
                 }
             }
@@ -109,8 +120,9 @@ fn main() -> ExitCode {
         Command::Rules => {
             for r in rules::all_rules() {
                 let m = r.meta();
+                let opt = if m.default_enabled { "" } else { " (opt-in)" };
                 println!(
-                    "{:<28} {:<16} {:<8} evidence: {:<8} {}",
+                    "{:<28} {:<16} {:<8} evidence: {:<8} {}{opt}",
                     m.id, m.category, m.severity, m.evidence, m.summary
                 );
             }

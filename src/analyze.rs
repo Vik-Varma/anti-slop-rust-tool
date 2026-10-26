@@ -98,12 +98,20 @@ pub fn analyze_source(
     FileReport { file: display, findings, functions: fns, parse_error: None, kind: Some(kind), tokens }
 }
 
-pub fn analyze_files(files: &[PathBuf], config: &Config, rules: &[Box<dyn Rule>]) -> Vec<FileReport> {
+/// Analyses `files`. `roots` are the paths the user asked to check; a file's
+/// location relative to them (e.g. `examples/foo/src/lib.rs`) also informs
+/// its classification.
+pub fn analyze_files(files: &[PathBuf], roots: &[PathBuf], config: &Config, rules: &[Box<dyn Rule>]) -> Vec<FileReport> {
     let layout = crate::modtree::compute(files);
     let mut reports: Vec<FileReport> = files
         .par_iter()
         .map(|path| {
-            let kind = layout.classify(path);
+            let rel = roots.iter().find_map(|r| path.strip_prefix(r).ok());
+            let by_location = rel.map(FileKind::from_path);
+            let kind = match by_location {
+                Some(k @ (FileKind::Test | FileKind::Bench | FileKind::Example)) => k,
+                _ => layout.classify(path),
+            };
             match std::fs::read_to_string(path) {
                 Ok(src) => analyze_source(path, path.clone(), kind, &src, config, rules),
                 Err(e) => FileReport {

@@ -23,11 +23,12 @@ static COLLECT: RuleMeta = RuleMeta {
     default_enabled: true,
     summary: "Iterator collected into a `Vec` only to be measured or iterated again",
     rationale: "`.collect::<Vec<_>>().len()` allocates and fills a vector just to count it; \
-`.count()`, `.next().is_none()`, `.any(..)` or iterating directly avoid the allocation. The Rust \
+`.count()`, `.next().is_none()` or `.any(..)` avoid the allocation. The Rust \
 Performance Book: 'You should avoid calling collect if the collection is then only iterated over \
 again.' Our benchmark measured the cost. Only the immediate-chain form is flagged, because \
 Clippy's broader `needless_collect` was demoted for false positives (collecting is sometimes \
-needed to end a borrow).",
+needed to end a borrow, and `.collect::<Vec<_>>().into_iter()` can be needed for `.rev()` or \
+`ExactSizeIterator`).",
     sources: &[
         "N. Nethercote. The Rust Performance Book, 'Iterators': https://nnethercote.github.io/perf-book/iterators.html",
         "Clippy lint `needless_collect` (nursery since 1.67, PR #9705).",
@@ -162,7 +163,6 @@ impl Rule for NeedlessCollect {
             let suggestion = match outer.method.to_string().as_str() {
                 "len" => "use `.count()`",
                 "is_empty" => "use `.next().is_none()`",
-                "iter" | "into_iter" => "iterate the original iterator directly",
                 "contains" => "use `.any(|x| x == ..)`",
                 "first" => "use `.next()`",
                 "last" => "use `.last()` on the iterator",
@@ -214,7 +214,9 @@ fn root(e: &Expr) -> Option<String> {
     }
 }
 
-const CLONE_METHODS: &[&str] = &["clone", "to_owned", "to_vec"];
+// Only `clone` is guaranteed to return the same type; `to_owned`/`to_vec` often
+// convert (`&str` -> `String`) to satisfy an API that takes `&String`/`&Vec`.
+const CLONE_METHODS: &[&str] = &["clone"];
 
 fn borrowed_clone(arg: &Expr) -> Option<&syn::ExprMethodCall> {
     let Expr::Reference(r) = peel(arg) else { return None };
@@ -359,6 +361,7 @@ fn a(v: &[u32]) -> usize {
     let e = v.iter().collect::<Vec<&u32>>().is_empty();
     let d = v.iter().collect::<std::collections::HashSet<_>>().len();
     let s = v.iter().collect::<Vec<_>>();
+    let r = v.iter().collect::<Vec<_>>().into_iter().rev();
     n
 }
 "#;
@@ -376,7 +379,8 @@ fn a(v: &[u32]) -> usize {
         let src = r#"
 fn a(name: String, v: Vec<u8>) {
     takes(&name.clone());
-    obj.method(&v.to_vec(), 1);
+    obj.method(&v.clone(), 1);
+    kinds.contains(&name.as_str().to_owned());
     self.process(&self.name.clone());
     update(&mut state, &state.key.clone());
     takes(&name);

@@ -188,6 +188,11 @@ fn is_phantom(ty: &syn::Type) -> bool {
     matches!(ty, syn::Type::Path(tp) if tp.path.segments.last().is_some_and(|s| s.ident == "PhantomData"))
 }
 
+const NON_AUTO_STD_TRAITS: &[&str] = &[
+    "Sized", "Clone", "Copy", "Debug", "Display", "Default", "PartialEq", "Eq", "PartialOrd", "Ord", "Hash",
+    "Unpin", "Future", "Iterator", "AsRef", "AsMut", "Borrow", "Into", "From", "Fn", "FnMut", "FnOnce", "Any",
+];
+
 fn bound_names(bounds: &syn::punctuated::Punctuated<TypeParamBound, syn::Token![+]>) -> Vec<String> {
     bounds
         .iter()
@@ -248,7 +253,11 @@ impl Rule for UnboundedSendSync {
                         || bounds.iter().any(|(k, b)| {
                             k.starts_with(&format!("{p} ::")) && b.iter().any(|n| accepted.contains(&n.as_str()))
                         });
-                    if has {
+                    // A bound on a crate-specific trait may carry `Send`/`Sync` as a supertrait,
+                    // which we cannot see; only report parameters bounded by nothing or by std
+                    // traits that are known not to imply it.
+                    let opaque = bounds.get(&p).is_some_and(|b| b.iter().any(|n| !NON_AUTO_STD_TRAITS.contains(&n.as_str())));
+                    if has || opaque {
                         continue;
                     }
                     // Skip parameters that only appear inside PhantomData.
@@ -279,7 +288,7 @@ impl Rule for UninitMemory {
         }
         impl<'ast> Visit<'ast> for V<'_, '_, '_> {
             fn visit_expr_method_call(&mut self, m: &'ast syn::ExprMethodCall) {
-                if m.method == "assume_init" {
+                if m.method == "assume_init" && self.sink.ctx().is_production_line(m.method.span().start().line) {
                     if let Expr::Call(c) = &*m.receiver {
                         if let Expr::Path(p) = &*c.func {
                             if path_string(&p.path).ends_with("MaybeUninit::uninit") {
@@ -358,20 +367,21 @@ impl Rule for SetLenUninit {
         }
         impl<'ast> Visit<'ast> for V<'_, '_, '_> {
             fn visit_block(&mut self, b: &'ast syn::Block) {
-                let mut allocated = false;
-                let mut written = false;
+                // Like Clippy's `uninit_vec`: only `set_len` *immediately* after the
+                // allocation is reported, and buffers of `MaybeUninit` are fine.
+                let mut prev_allocates = false;
                 for s in &b.stmts {
+                    let text = s.to_token_stream().to_string();
                     if mentions_call(s, &["set_len"]) {
                         let set_len_writes = stmt_expr(s).is_some_and(|e| contains_method_call(e, WRITES));
-                        if allocated && !written && !set_len_writes {
-                            self.sink.emit_span(s.span(), "`set_len` after allocating but before initialising the elements");
+                        let line = s.span().start().line;
+                        if prev_allocates && !set_len_writes && self.sink.ctx().is_production_line(line) {
+                            self.sink.emit_span(s.span(), "`set_len` right after allocating, before initialising the elements");
                         }
-                        allocated = false;
-                    } else if mentions_call(s, &["with_capacity", "reserve", "reserve_exact"]) {
-                        allocated = true;
-                        written = false;
-                    } else if mentions_call(s, WRITES) {
-                        written = true;
+                        prev_allocates = false;
+                    } else {
+                        prev_allocates = mentions_call(s, &["with_capacity", "reserve", "reserve_exact"])
+                            && !text.contains("MaybeUninit");
                     }
                 }
                 visit::visit_block(self, b);
@@ -429,8 +439,10 @@ unsafe impl<T: Send> Sync for W<T> {}
 unsafe impl<T> Sync for W<T> {}
 struct L<T>(T);
 unsafe impl<T: Link> Send for L<T> where T::Target: Send {}
+unsafe impl<T: Schedule> Send for L<T> {}
+unsafe impl<T: Clone> Send for L<T> {}
 "#;
-        assert_eq!(lines(&check_rule("unbounded-send-sync", src)), vec![3, 9]);
+        assert_eq!(lines(&check_rule("unbounded-send-sync", src)), vec![3, 9, 13]);
     }
 
     #[test]
@@ -458,6 +470,17 @@ fn good(n: usize) -> Vec<u8> {
     v
 }
 fn truncate(v: &mut Vec<u8>) { unsafe { v.set_len(0); } }
+fn later_write(n: usize) -> Vec<u8> {
+    let mut v = Vec::with_capacity(n);
+    fill(&mut v);
+    unsafe { v.set_len(n); }
+    v
+}
+fn maybe_uninit(n: usize) -> Vec<std::mem::MaybeUninit<u8>> {
+    let mut v: Vec<std::mem::MaybeUninit<u8>> = Vec::with_capacity(n);
+    unsafe { v.set_len(n); }
+    v
+}
 "#;
         assert_eq!(lines(&check_rule("set-len-uninit", src)), vec![4]);
     }

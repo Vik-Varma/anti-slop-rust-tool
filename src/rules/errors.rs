@@ -136,7 +136,11 @@ impl<'ast> Visit<'ast> for SwallowFinder<'_, '_, '_> {
                 // `write!(string, ..).ok()` cannot fail for `String` and is a common idiom.
                 let on_write_macro = matches!(peel(&m.receiver), Expr::Macro(mac)
                     if matches!(crate::ast_util::macro_name(&mac.mac).as_str(), "write" | "writeln"));
-                if m.method == "ok" && m.args.is_empty() && !on_write_macro {
+                // Sending to a channel whose receiver may be gone, or setting a OnceCell,
+                // are deliberate fire-and-forget idioms (like `let _ = tx.send(..)`).
+                let fire_and_forget = matches!(peel(&m.receiver), Expr::MethodCall(inner)
+                    if matches!(inner.method.to_string().as_str(), "send" | "try_send" | "unbounded_send" | "set" | "post" | "send_replace"));
+                if m.method == "ok" && m.args.is_empty() && !on_write_macro && !fire_and_forget {
                     self.report(m.method.span(), "`.ok();` silences the Result without checking it");
                 }
             }
@@ -205,6 +209,8 @@ fn io_call(e: &Expr) -> Option<&syn::ExprMethodCall> {
     match strip_propagation(e) {
         Expr::MethodCall(m)
             if m.args.len() == 1
+                // `self.write(..)` is usually the type's own helper, not `io::Write::write`.
+                && !matches!(peel(&m.receiver), Expr::Path(p) if p.path.is_ident("self"))
                 && is_buffer_arg(&m.args[0])
                 && matches!(m.method.to_string().as_str(), "read" | "write" | "read_vectored" | "write_vectored") =>
         {
@@ -237,8 +243,10 @@ impl Rule for UnusedIoAmount {
         impl<'ast> Visit<'ast> for Finder<'_, '_, '_> {
             fn visit_stmt(&mut self, s: &'ast Stmt) {
                 match s {
-                    // Statements whose value is discarded: `x.write(..)?;`
-                    Stmt::Expr(e, Some(_)) => {
+                    // Statements whose value is discarded: `x.write(..)?;`. A bare
+                    // `x.write(..);` is skipped: for io it already warns via `#[must_use]`,
+                    // and methods returning `()` (`Hasher::write`) are not I/O.
+                    Stmt::Expr(e, Some(_)) if !matches!(peel(e), Expr::MethodCall(m) if io_call(e).is_some_and(|c| std::ptr::eq(c, m))) => {
                         if let Some(m) = io_call(e) {
                             self.flag(m);
                         }
@@ -351,6 +359,8 @@ fn a(f: &mut std::fs::File, buf: &mut [u8]) -> std::io::Result<()> {
     f.write_all(b"ok")?;
     lock.write().unwrap();
     peer.write(&Message::Goodbye)?;
+    hasher.write(bytes);
+    self.write(data)?;
     opts.write(true);
     slot.get().write(MaybeUninit::new(v));
     Ok(())

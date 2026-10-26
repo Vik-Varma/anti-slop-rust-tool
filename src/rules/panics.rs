@@ -107,7 +107,7 @@ flight aborts the whole process (reproduced in tests/demonstrations.rs). The API
 static EXIT: RuleMeta = RuleMeta {
     id: "exit-in-library",
     category: Category::Robustness,
-    severity: Severity::Warning,
+    severity: Severity::Info,
     evidence: Evidence::Moderate,
     default_enabled: true,
     summary: "`std::process::exit` called from library code",
@@ -298,9 +298,16 @@ impl Rule for TodoInProduction {
                 self.body(&f.block);
                 visit::visit_item_fn(self, f);
             }
-            fn visit_impl_item_fn(&mut self, f: &'ast syn::ImplItemFn) {
-                self.body(&f.block);
-                visit::visit_impl_item_fn(self, f);
+            fn visit_item_impl(&mut self, i: &'ast syn::ItemImpl) {
+                // In trait impls, `unimplemented!()` marks an unsupported trait method.
+                if i.trait_.is_none() {
+                    for item in &i.items {
+                        if let syn::ImplItem::Fn(f) = item {
+                            self.body(&f.block);
+                        }
+                    }
+                }
+                visit::visit_item_impl(self, i);
             }
         }
         Stubs { ctx: sink.ctx(), sink }.visit_file(&input.ctx.ast);
@@ -439,7 +446,7 @@ mod tests {
 
     #[test]
     fn todo_flagged_outside_tests() {
-        let src = "fn a() { todo!() }\nfn b() { unimplemented!(\"x\") }\n#[cfg(test)]\nmod t { fn c() { todo!() } }\nfn d(x: u8) { match x { 0 => {}, _ => unimplemented!() } }\n";
+        let src = "fn a() { todo!() }\nfn b() { unimplemented!(\"x\") }\n#[cfg(test)]\nmod t { fn c() { todo!() } }\nfn d(x: u8) { match x { 0 => {}, _ => unimplemented!() } }\nimpl Read for S { fn read(&mut self) { unimplemented!() } }\n";
         assert_eq!(lines(&check_rule("todo-in-production", src)), vec![1, 2]);
         assert!(check_rule_at("todo-in-production", "tests/it.rs", src).is_empty());
         assert!(check_rule_at("todo-in-production", "examples/e.rs", src).is_empty());

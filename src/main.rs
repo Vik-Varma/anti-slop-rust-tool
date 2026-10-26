@@ -85,9 +85,10 @@ fn main() -> ExitCode {
                     return ExitCode::from(2);
                 }
             }
-            let files = analyze::discover(&default_paths(paths));
+            let roots = default_paths(paths);
+            let files = analyze::discover(&roots);
             let all = rules::all_rules();
-            let mut reports = analyze::analyze_files(&files, &cfg, &all);
+            let mut reports = analyze::analyze_files(&files, &roots, &cfg, &all);
             for r in &mut reports {
                 r.findings.retain(|f| f.severity >= min_severity);
             }
@@ -101,9 +102,10 @@ fn main() -> ExitCode {
             if failed { ExitCode::from(1) } else { ExitCode::SUCCESS }
         }
         Command::Metrics { paths } => {
-            let files = analyze::discover(&default_paths(paths));
+            let roots = default_paths(paths);
+            let files = analyze::discover(&roots);
             let cfg = Config { only: vec!["none".into()], ..Config::default() };
-            for r in analyze::analyze_files(&files, &cfg, &[]) {
+            for r in analyze::analyze_files(&files, &roots, &cfg, &[]) {
                 if let Some(e) = &r.parse_error {
                     eprintln!("{}: parse error: {e}", r.file.display());
                 }

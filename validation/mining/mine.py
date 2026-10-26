@@ -130,7 +130,7 @@ def mine_repo(args_tuple):
 
         # Findings at the snapshot, attributed to the innermost enclosing function.
         findings = collections.defaultdict(collections.Counter)
-        report = json.loads(run_tool(tool, ["check", snap_dir, "--format", "json"]) or '{"findings": []}')
+        report = json.loads(run_tool(tool, ["check", snap_dir, "--all-rules", "--format", "json"]) or '{"findings": []}')
         for f in report["findings"]:
             rel = os.path.relpath(f["file"], snap_dir)
             fn = innermost(snap_fns.get(rel, []), f["line"])
@@ -222,7 +222,7 @@ def main():
     ap.add_argument("--tool", required=True)
     ap.add_argument("--repos-dir", required=True)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--snapshot", default="2024-01-01")
+    ap.add_argument("--snapshot", default="2023-07-01")
     ap.add_argument("--window-end", default="2025-07-01")
     ap.add_argument("--jobs", type=int, default=4)
     ap.add_argument("repos", nargs="*")

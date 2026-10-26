@@ -91,10 +91,10 @@ const PLACEHOLDER_PATTERNS: &[&[&str]] = &[
     &["^", "rest", "of", "the", "code"],
     &["^", "rest", "of", "the", "implementation"],
     &["^", "rest", "of", "implementation"],
-    &["^", "existing", "code"],
     &["^", "implementation", "goes", "here"],
     &["^", "implementation", "here"],
     &["^", "add", "implementation"],
+    &["existing", "code", "..."],
     &["existing", "code", "here"],
     &["existing", "code", "unchanged"],
     &["existing", "code", "remains"],
@@ -122,13 +122,7 @@ const PLACEHOLDER_PATTERNS: &[&[&str]] = &[
     &["this", "is", "a", "placeholder"],
     &["this", "is", "a", "stub"],
     &["this", "is", "a", "simplified"],
-    &["mock", "implementation"],
-    &["dummy", "implementation"],
-    &["stub", "implementation"],
     &["you", "would", "need", "to"],
-    &["you", "would", "want", "to"],
-    &["you", "might", "want", "to"],
-    &["you", "may", "want", "to"],
     &["you", "would", "typically"],
     &["replace", "with", "actual"],
     &["replace", "with", "real"],
@@ -256,10 +250,28 @@ impl Rule for CommentedOutCode {
             if !ctx.is_production_line(block[0].line) {
                 continue;
             }
+            // Code inside ``` fences, or introduced by a line ending in ':', is an
+            // illustration, not dead code.
+            let mut illustrative = vec![false; block.len()];
+            let mut in_fence = false;
+            for (k, c) in block.iter().enumerate() {
+                let t = c.text.trim();
+                if t.starts_with("```") {
+                    in_fence = !in_fence;
+                    illustrative[k] = true;
+                } else {
+                    illustrative[k] = in_fence;
+                }
+            }
             // Comment blocks often mix prose with code: find maximal runs that parse.
             let mut i = 0;
             while i < block.len() {
-                let found = (i..block.len()).rev().find(|&j| {
+                if illustrative[i] || (i > 0 && block[i - 1].text.trim_end().ends_with(':')) {
+                    i += 1;
+                    continue;
+                }
+                let end = (i..block.len()).find(|&k| illustrative[k]).unwrap_or(block.len());
+                let found = (i..end).rev().find(|&j| {
                     let text: String = block[i..=j].iter().map(|c| c.text.as_str()).collect::<Vec<_>>().join("\n");
                     looks_like_code(&text)
                 });
@@ -386,7 +398,7 @@ pub fn restates(comment: &str, code: &str) -> bool {
         .filter(|w| !w.is_empty())
         .map(|w| w.to_ascii_lowercase())
         .collect();
-    if words.is_empty() || words.len() > 8 || comment.contains('?') {
+    if words.len() < 2 || words.len() > 8 || comment.contains('?') {
         return false;
     }
     let content: Vec<&String> = words.iter().filter(|w| !STOPWORDS.contains(&w.as_str())).collect();
@@ -472,6 +484,11 @@ fn a(x: u32) -> u32 {
     x
 }
 // fn old() {}
+// Example:
+// let z = 1;
+// ```
+// let w = 2;
+// ```
 "#;
         assert_eq!(lines(&check_rule("commented-out-code", src)), vec![3, 8, 13]);
     }

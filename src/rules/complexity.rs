@@ -158,7 +158,7 @@ impl Rule for BoolParams {
             sink.emit(
                 f.line,
                 f.column,
-                format!("`{}` takes {} `bool` parameters; consider enums or a options struct", f.name, f.bool_params),
+                format!("`{}` takes {} `bool` parameters; consider enums or an options struct", f.name, f.bool_params),
             );
         }
     }

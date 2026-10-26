@@ -229,6 +229,9 @@ impl Rule for DenyWarnings {
     }
     fn check(&self, input: &Input, sink: &mut Sink) {
         for attr in &input.ctx.ast.attrs {
+            if !input.ctx.is_production_line(attr.span().start().line) {
+                continue;
+            }
             let path = attr.path();
             if !(path.is_ident("deny") || path.is_ident("forbid")) {
                 continue;

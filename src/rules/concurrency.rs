@@ -100,6 +100,13 @@ fn guard_call(e: &Expr) -> Option<&syn::ExprMethodCall> {
     }
 }
 
+/// `stdout()`/`stderr()`/`stdin()` locks are reentrant: re-locking on the same
+/// thread does not deadlock.
+fn is_reentrant(receiver: &Expr) -> bool {
+    let key = expr_key(receiver).to_ascii_lowercase();
+    ["stdout", "stderr", "stdin"].iter().any(|s| key.contains(s))
+}
+
 /// Finds sync lock calls inside an expression (not inside closures or async
 /// blocks), returning (receiver key, span). Lock calls that are awaited are
 /// returned too when `include_awaited` is set.
@@ -117,7 +124,7 @@ fn lock_calls(e: &Expr, include_awaited: bool) -> Vec<(String, proc_macro2::Span
             visit::visit_expr_await(self, a);
         }
         fn visit_expr_method_call(&mut self, m: &'ast syn::ExprMethodCall) {
-            let is_lock = m.args.is_empty() && LOCK_METHODS.iter().any(|n| m.method == n);
+            let is_lock = m.args.is_empty() && LOCK_METHODS.iter().any(|n| m.method == n) && !is_reentrant(&m.receiver);
             let awaited = self.awaited.contains(&(m as *const _));
             if is_lock && (self.include_awaited || !awaited) {
                 self.out.push((expr_key(&m.receiver), m.method.span()));
@@ -605,6 +612,7 @@ fn ok(m: &std::sync::Mutex<Vec<u32>>, n: &std::sync::Mutex<u32>) {
     let first = m.lock().unwrap().first().copied();
     match first { Some(_) => { m.lock().unwrap().push(1); } None => {} }
     match m.lock().unwrap().first() { Some(_) => { n.lock().unwrap(); } None => {} }
+    match stderr.lock().write_all(b"x") { Ok(_) => stderr.lock().flush(), Err(e) => Err(e) }
     if m.lock().unwrap().is_empty() { m.lock().unwrap().push(1); }
 }
 "#;

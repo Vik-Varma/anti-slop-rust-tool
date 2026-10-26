@@ -296,10 +296,12 @@ fn bin() -> Command {
 
 #[test]
 fn r19_csv_quotes_by_doubling() {
-    let dir = crate_dir("csv", &[("we\"ird.rs", "fn f() {}\n")]);
+    // Windows forbids `"` in file names, so the path here only needs quoting; the doubling itself
+    // is checked by `csv_str`'s unit test in main.rs.
+    let dir = crate_dir("csv", &[("we,ird.rs", "fn f() {}\n")]);
     let out = bin().arg("metrics").arg(&dir).output().expect("runs");
     let text = String::from_utf8_lossy(&out.stdout);
-    assert!(text.contains("we\"\"ird.rs\""), "{text}");
+    assert!(text.contains("we,ird.rs\""), "{text}");
     let _ = fs::remove_dir_all(&dir);
 }
 

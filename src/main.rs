@@ -378,3 +378,11 @@ fn metrics(o: &Options) -> Result<ExitCode, Error> {
         ExitCode::from(2)
     })
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn csv_quotes_by_doubling() {
+        assert_eq!(super::csv_str("we\"ird,x.rs"), "\"we\"\"ird,x.rs\"");
+    }
+}

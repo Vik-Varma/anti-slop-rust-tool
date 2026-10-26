@@ -71,6 +71,7 @@ pub fn get(id: &str) -> Option<&'static Rule> {
 }
 
 const BOOK_PANIC: &str = "Rust Book ch. 9.3, To panic! or Not to panic!: https://doc.rust-lang.org/book/ch09-03-to-panic-or-not-to-panic.html";
+const BOOK_EXPECT: &str = "Rust Book ch. 9.2 (\"In production-quality code, most Rustaceans choose expect rather than unwrap\"): https://doc.rust-lang.org/book/ch09-02-recoverable-errors-with-result.html";
 const API_DTOR: &str = "Rust API Guidelines C-DTOR-FAIL, destructors never fail: https://rust-lang.github.io/api-guidelines/dependability.html#c-dtor-fail";
 
 static RULES: &[Rule] = &[
@@ -88,6 +89,7 @@ static RULES: &[Rule] = &[
         precision: "validation sample (docs/AUDIT.md): 8 of 20 crash on real external input (non-UTF-8 paths and arguments, env vars, dump files, process output); the rest were validated data or dev tooling",
         sources: &[
             BOOK_PANIC,
+            BOOK_EXPECT,
             "Cloudflare, 18 November 2025 outage: https://blog.cloudflare.com/18-november-2025-outage/",
             "experiments/tests/panics.rs: unwrap_panics_without_context, a_panic_poisons_shared_state",
         ],
@@ -110,6 +112,7 @@ static RULES: &[Rule] = &[
         precision: "validation sample (docs/AUDIT.md): 2 of 20 on fallible operations; 15 asserted invariants the code maintains; 3 in dev-only binaries",
         sources: &[
             BOOK_PANIC,
+            BOOK_EXPECT,
             "Clippy unwrap_used (restriction): https://rust-lang.github.io/rust-clippy/master/index.html#unwrap_used",
             "study/results.md, study/replication.md: H7",
         ],
@@ -171,7 +174,7 @@ static RULES: &[Rule] = &[
         summary: "A `static mut` item",
         harm: "Every access is unsafe and nothing stops two threads, or two references, touching it at once: \
                a data race, which is undefined behaviour. Miri reports a data race on a two-thread counter. \
-               Rust 2024 makes references to it a hard error (`static_mut_refs`).",
+               Rust 2024 denies references to it by default (`static_mut_refs`).",
         false_positives: "FFI tables a C library writes to (Python module definitions); a cell type or \
                           `&raw mut` access still says that in the code.",
         evidence: Evidence::Demonstrated,
@@ -246,7 +249,7 @@ static RULES: &[Rule] = &[
         evidence: Evidence::Demonstrated,
         precision: "no instances outside tests in the corpus; all 10 in tests were deliberate, hence tests are exempt",
         sources: &[
-            "Tokio, spawn_blocking: https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html",
+            "Tokio, CPU-bound tasks and blocking code (\"blocking code that would otherwise block other tasks from running\"): https://docs.rs/tokio/latest/tokio/index.html#cpu-bound-tasks-and-blocking-code",
             "Alice Ryhl (Tokio maintainer), Async: What is blocking?: https://ryhl.io/blog/async-what-is-blocking/",
             "experiments/tests/concurrency.rs: blocking_sleep_stalls_other_tasks",
         ],
@@ -257,8 +260,9 @@ static RULES: &[Rule] = &[
         severity: Severity::Note,
         summary: "`let _ =` or `.ok();` on a write, flush, sync, rename or copy",
         harm: "The error is the only signal that data didn't reach disk. Verified: on a full device \
-               `write_all` fails with ENOSPC and the caller reports success. Yuan et al. (OSDI '14) found \
-               most catastrophic failures in distributed systems came from mishandled errors.",
+               `write_all` fails with ENOSPC and the caller reports success. In five distributed systems, \
+               Yuan et al. (OSDI '14) traced 92% of catastrophic failures to incorrect handling of \
+               non-fatal errors that the software had signalled.",
         false_positives: "Best-effort writes where loss is acceptable. Writes to stdout/stderr and removals \
                           aren't flagged.",
         evidence: Evidence::Demonstrated,

@@ -61,6 +61,10 @@ Size itself is the strongest signal: each doubling of a function's lines doubles
 later fix (OR 2.13). Every metric above correlates with size (Spearman ρ 0.40 to 0.73). This is
 the confound El Emam et al. (IEEE TSE 2001) showed for object-oriented metrics, and that Herraiz
 & Hassan (2010) and Landman et al. (2016) found between McCabe complexity and lines of code.
+Clippy reached the same place from experience: its `cognitive_complexity` lint now sits in the
+restriction group because "the true Cognitive Complexity of a method is not something we can
+calculate using modern technology", and it was kept there "so as to not mislead users into using
+this lint as a measurement tool".
 
 ### Comments and other "smells" (defect study)
 
@@ -80,6 +84,12 @@ had point estimates above 1 in both corpora (1.18, then 1.92), but neither survi
 multiple-comparison correction, it wasn't a preregistered hypothesis, and only 209 replication
 functions had one. That is a lead for a future preregistered test, not evidence.
 
+Evidence for TODO comments does exist elsewhere, in a narrower setting. Yuan et al. found that in
+35% of catastrophic failures in five distributed systems, the bug was in an error handler that
+was empty, only logged, aborted on an over-general exception, or carried a "FIXME" or "TODO".
+That is a TODO inside an error handler in Java, not a TODO anywhere in a Rust function. It
+doesn't contradict the null result here, but it suggests a narrower hypothesis worth testing.
+
 Full tables, including the flexible-size and changed-functions-only robustness checks, are in
 `study/results.md` and `study/antislop-phrases.md`.
 
@@ -97,8 +107,8 @@ Full tables, including the flexible-size and changed-functions-only robustness c
 - **Fix classification.** Fixes are commits whose subject says fix, bug, crash, panic,
   regression, wrong and so on, minus docs, CI and typo commits. A hand check of 50 found 33 real
   defect fixes (66%). Most misses touched only tests, examples or docs, which the study excludes.
-  Among commits touching other code, about 80% were fixes, in line with the misclassification
-  rate Herzig et al. (ICSE 2013) report for issue data.
+  Among commits touching other code, about 80% were fixes. For comparison, Herzig et al. (ICSE
+  2013) hand-checked over 7,000 issue reports and found about a third weren't bugs.
 - **Function identity** is (file path, qualified name). Renamed or moved functions lose their
   later fixes, which biases every effect towards zero equally. Meilisearch's crate moves are the
   clearest case.
@@ -109,16 +119,28 @@ Full tables, including the flexible-size and changed-functions-only robustness c
 - **Audit.** One person (the author) judged the samples, from code context, without running the
   code. The samples, seeds and judgments are in [AUDIT.md](AUDIT.md) so they can be re-judged.
 
+## Sources and how they were checked
+
+Every web page cited by a rule or in these docs was fetched on 2026-10-26, and the claim it is
+cited for was found in its text. `study/check_sources.py` repeats the check (a regex per claim)
+and exits non-zero if any claim has gone missing: 38 claims on 25 pages plus the six Clippy lint groups,
+none missing. Two corrections came out of that check. The Book's "in production-quality code,
+most Rustaceans choose `expect` rather than `unwrap`" is in chapter 9.2, not 9.3. And Rust 2024
+makes `static_mut_refs` *deny by default*, a lint that can be allowed, not a hard error.
+Papers were checked against their publisher records (Crossref DOIs below). The Yuan et al. and
+Tricorder figures were checked against the papers' PDFs, and the Cloudflare quote against the
+post-mortem.
+
 ## References
 
-- McCabe, T. J. A Complexity Measure. IEEE TSE 1976.
+- McCabe, T. J. A Complexity Measure. IEEE TSE 2(4), 1976. doi:10.1109/TSE.1976.233837
 - Campbell, G. A. Cognitive Complexity (SonarSource white paper, 2018). <https://www.sonarsource.com/docs/CognitiveComplexity.pdf>
-- El Emam, K., Benlarbi, S., Goel, N., Rai, S. N. The confounding effect of class size on the validity of object-oriented metrics. IEEE TSE 2001.
-- Herraiz, I., Hassan, A. E. Beyond lines of code: do we need more complexity metrics? In *Making Software*, O'Reilly 2010.
-- Landman, D., Serebrenik, A., Bouwers, E., Vinju, J. Empirical analysis of the relationship between CC and SLOC in a large corpus of Java methods and C functions. JSEP 2016.
-- Mockus, A., Votta, L. Identifying reasons for software changes using historic databases. ICSM 2000.
-- Herzig, K., Just, S., Zeller, A. It's not a bug, it's a feature. ICSE 2013.
+- El Emam, K., Benlarbi, S., Goel, N., Rai, S. N. The confounding effect of class size on the validity of object-oriented metrics. IEEE TSE 27(7), 2001. doi:10.1109/32.935855
+- Herraiz, I., Hassan, A. E. Beyond lines of code: do we need more complexity metrics? Ch. 8 of *Making Software*, O'Reilly 2010. <https://www.oreilly.com/library/view/making-software/9780596808310/ch08.html>
+- Landman, D., Serebrenik, A., Bouwers, E., Vinju, J. Empirical analysis of the relationship between CC and SLOC in a large corpus of Java methods and C functions. J. Software: Evolution and Process 28(7), 2016. doi:10.1002/smr.1760
+- Mockus, A., Votta, L. Identifying reasons for software changes using historic databases. ICSM 2000. doi:10.1109/ICSM.2000.883028
+- Herzig, K., Just, S., Zeller, A. It's not a bug, it's a feature: how misclassification impacts bug prediction. ICSE 2013. doi:10.1109/ICSE.2013.6606585
 - Yuan, D. et al. Simple Testing Can Prevent Most Critical Failures. OSDI 2014. <https://www.usenix.org/conference/osdi14/technical-sessions/presentation/yuan>
-- Sadowski, C. et al. Tricorder: Building a Program Analysis Ecosystem. ICSE 2015. <https://research.google/pubs/pub43322/>
+- Sadowski, C., van Gogh, J., Jaspan, C., Söderberg, E., Winter, C. Tricorder: Building a Program Analysis Ecosystem. ICSE 2015. doi:10.1109/ICSE.2015.76
 - Cloudflare. Cloudflare outage on November 18, 2025. <https://blog.cloudflare.com/18-november-2025-outage/>
-- The Rust Book, ch. 9.3; the Rust Reference; std docs for `MaybeUninit`, `mem::uninitialized`, `process::exit`, `BufWriter`, `todo!`, `unimplemented!`, `dbg!`; the Edition Guide on `static mut` references; Rust API Guidelines C-DTOR-FAIL; RFC 1105; Rust Design Patterns, `#![deny(warnings)]`; Tokio's `Mutex` and `spawn_blocking` docs. Links are on each rule: `anti-slop explain <rule>`.
+- The Rust Book, ch. 9.2 and 9.3; the Rust Reference; std docs for `MaybeUninit`, `mem::uninitialized`, `process::exit`, `BufWriter`, `Drop`, `todo!`, `unimplemented!`, `dbg!`; the Edition Guide on `static mut` references; Rust API Guidelines C-DTOR-FAIL; RFC 1105; Rust Design Patterns, `#![deny(warnings)]`; Tokio's `Mutex` docs and its section on blocking code; the std-dev guide on safety comments; CWE-252 and CWE-197; the Clippy lint list. Links are on each rule: `anti-slop explain <rule>`.

@@ -2,6 +2,9 @@
 //! flagged pattern causes, next to a control showing the recommended fix
 //! does not fail. Run with `cargo test --test demonstrations -- --nocapture`.
 
+// These tests contain the bad patterns on purpose; Clippy flags several of them too.
+#![allow(clippy::unused_io_amount, clippy::await_holding_lock, clippy::eq_op, clippy::single_match)]
+
 use std::io::Write;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -121,12 +124,14 @@ fn blocking_sleep_stalls_other_tasks() {
 fn float_literal_equality_fails() {
     let a = 0.1f64;
     let b = 0.2f64;
+    // anti-slop: allow(float-equality) -- demonstrating the flagged pattern
     assert!(a + b != 0.3, "0.1 + 0.2 == 0.3 is false in binary floating point");
     let tenth_sum: f64 = (0..10).map(|_| 0.1).sum();
     assert!(tenth_sum != 1.0);
     assert!(((a + b) - 0.3).abs() < 1e-12, "comparison with a tolerance works");
     // Exactly representable literals (dyadic rationals) compare exactly.
-    assert!(0.5f64 + 0.25 == 0.75);
+    let (half, quarter) = (std::hint::black_box(0.5f64), std::hint::black_box(0.25f64));
+    assert!(half + quarter == 0.75);
 }
 
 // ---------------------------------------------------------------- unused-io-amount
@@ -227,6 +232,7 @@ fn unbounded_send_impl_makes_rc_sendable() {
     #[allow(dead_code)]
     struct Wrapper<T>(T);
     // The flagged pattern:
+    // anti-slop: allow(unbounded-send-sync)
     unsafe impl<T> Send for Wrapper<T> {}
     fn assert_send<T: Send>() {}
     // `Rc` is deliberately !Send, yet this compiles: the impl lets safe code
@@ -281,7 +287,17 @@ fn deny_warnings_breaks_build_when_a_dependency_deprecates_something() {
         std::fs::write(dir.join(format!("{name}.rs")), src).unwrap();
         std::process::Command::new("rustc")
             .current_dir(&dir)
-            .args(["--edition", "2021", "--crate-type", "lib", &format!("{name}.rs"), "--extern", "dep=libdep.rlib", "-L", "."])
+            .args([
+                "--edition",
+                "2021",
+                "--crate-type",
+                "lib",
+                &format!("{name}.rs"),
+                "--extern",
+                "dep=libdep.rlib",
+                "-L",
+                ".",
+            ])
             .output()
             .unwrap()
             .status

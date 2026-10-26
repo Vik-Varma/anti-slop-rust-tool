@@ -86,9 +86,8 @@ fn child_files(file: &Path, decl: &ModDecl) -> Vec<PathBuf> {
 fn roots(root: &Path) -> (Vec<PathBuf>, Vec<PathBuf>) {
     let mut libs = Vec::new();
     let mut bins = Vec::new();
-    let manifest = std::fs::read_to_string(root.join("Cargo.toml"))
-        .ok()
-        .and_then(|t| toml::from_str::<toml::Value>(&t).ok());
+    let manifest =
+        std::fs::read_to_string(root.join("Cargo.toml")).ok().and_then(|t| toml::from_str::<toml::Value>(&t).ok());
     if let Some(m) = &manifest {
         if let Some(p) = m.get("lib").and_then(|l| l.get("path")).and_then(|p| p.as_str()) {
             libs.push(root.join(p));
@@ -118,7 +117,12 @@ fn roots(root: &Path) -> (Vec<PathBuf>, Vec<PathBuf>) {
 
 /// Walks the module tree from `start`, adding reachable files to `seen`;
 /// files under a `#[cfg(test)]` declaration go to `tests` instead.
-fn walk(start: &Path, seen: &mut HashSet<PathBuf>, tests: &mut HashSet<PathBuf>, cache: &mut HashMap<PathBuf, Vec<ModDecl>>) {
+fn walk(
+    start: &Path,
+    seen: &mut HashSet<PathBuf>,
+    tests: &mut HashSet<PathBuf>,
+    cache: &mut HashMap<PathBuf, Vec<ModDecl>>,
+) {
     let mut stack = vec![(canon(start), false)];
     while let Some((file, in_test)) = stack.pop() {
         let set = if in_test { &mut *tests } else { &mut *seen };
@@ -208,7 +212,10 @@ mod tests {
             std::fs::write(dir.join(f), "").unwrap();
         }
         let files: Vec<PathBuf> =
-            ["src/lib.rs", "src/main.rs", "src/cli.rs", "src/core.rs", "src/tests.rs", "src/cli/args.rs"].iter().map(|f| dir.join(f)).collect();
+            ["src/lib.rs", "src/main.rs", "src/cli.rs", "src/core.rs", "src/tests.rs", "src/cli/args.rs"]
+                .iter()
+                .map(|f| dir.join(f))
+                .collect();
         let layout = compute(&files);
         assert_eq!(layout.classify(&dir.join("src/core.rs")), FileKind::Library);
         assert_eq!(layout.classify(&dir.join("src/tests.rs")), FileKind::Test);

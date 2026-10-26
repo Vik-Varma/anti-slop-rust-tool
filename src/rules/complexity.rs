@@ -12,15 +12,15 @@ pub struct BoolParams;
 static COGNITIVE: RuleMeta = RuleMeta {
     id: "high-cognitive-complexity",
     category: Category::Maintainability,
-    severity: Severity::Warning,
-    evidence: Evidence::Moderate,
-    default_enabled: true,
+    severity: Severity::Info,
+    evidence: Evidence::Weak,
+    default_enabled: false,
     summary: "Function is hard to understand (cognitive complexity above threshold)",
     rationale: "Cognitive complexity (SonarSource) adds one point per break in linear control flow \
 and extra points for nesting. In a meta-analysis of 10 comprehension studies, Muñoz Barón, Wyrich \
 and Wagner (ESEM 2020) found it correlates with measured comprehension time and subjective \
 difficulty. Our own mining of Rust repositories (docs/EVIDENCE.md) tests whether functions above \
-the threshold receive more bug fixes than functions of the same size.",
+the threshold receive more bug fixes than functions of the same size. Not verified: in our mining of 40,320 functions, cognitive complexity was strongly correlated with size (Spearman 0.71) and added nothing once size was controlled (threshold OR 1.07, p = 0.60; per-SD OR 0.98, p = 0.69). Clippy reached the same conclusion and moved its lint to the restriction group.",
     sources: &[
         "G. A. Campbell. Cognitive Complexity: A new way of measuring understandability. SonarSource white paper, 2018.",
         "Muñoz Barón, Wyrich, Wagner. An Empirical Validation of Cognitive Complexity as a Measure of Source Code Understandability. ESEM 2020. doi:10.1145/3382494.3410636",
@@ -33,13 +33,13 @@ static LONG: RuleMeta = RuleMeta {
     category: Category::Maintainability,
     severity: Severity::Info,
     evidence: Evidence::Weak,
-    default_enabled: true,
+    default_enabled: false,
     summary: "Function has more lines of code than the threshold",
     rationale: "Long functions are the classic 'Long Method' smell. Size is the single most \
 reliable predictor of defect counts, but that is largely because bigger code has more places for \
 bugs; per-line defect density does not clearly rise with function length (El Emam et al. 2001 \
 on the size confounding effect). Reported as info: a long function is worth a look, not proof of \
-a problem.",
+a problem. Not verified: long functions are 12x more likely to be bug-fixed, but no more than expected for their size (size-adjusted OR 1.02, p = 0.90).",
     sources: &[
         "M. Fowler. Refactoring, 2nd ed. 2018 — 'Long Function'.",
         "El Emam, Benlarbi, Goel, Rai. The confounding effect of class size on the validity of object-oriented metrics. IEEE TSE 27(7), 2001.",
@@ -50,15 +50,15 @@ a problem.",
 static NESTING: RuleMeta = RuleMeta {
     id: "deep-nesting",
     category: Category::Maintainability,
-    severity: Severity::Warning,
-    evidence: Evidence::Moderate,
-    default_enabled: true,
+    severity: Severity::Info,
+    evidence: Evidence::Weak,
+    default_enabled: false,
     summary: "Control flow is nested deeper than the threshold",
     rationale: "Every nesting level adds context the reader has to hold in mind. A controlled \
 experiment (Johnson et al., ICSME 2019) found deeper nesting slowed comprehension, although its \
 nested snippets were also longer, so the evidence for comprehension is moderate and for defects \
 weak. The threshold is a convention, not an empirically derived limit. Early returns, `?`, \
-`let ... else` and helper functions flatten the code.",
+`let ... else` and helper functions flatten the code. Not verified: deep nesting showed no significant association beyond size (OR 1.38, p = 0.094; per-SD OR 1.00, p = 0.96).",
     sources: &[
         "Johnson, Lubo, Yedla, Aponte, Sharif. An Empirical Study Assessing Source Code Readability in Comprehension. ICSME 2019, pp. 513-523.",
         "validation/mining (this repository)",
@@ -68,7 +68,7 @@ weak. The threshold is a convention, not an empirically derived limit. Early ret
 static PARAMS: RuleMeta = RuleMeta {
     id: "too-many-params",
     category: Category::Maintainability,
-    severity: Severity::Warning,
+    severity: Severity::Info,
     evidence: Evidence::Moderate,
     default_enabled: true,
     summary: "Function takes more parameters than the threshold",
@@ -77,7 +77,7 @@ swapped without a compile error. Mining 200 MLOC at Google, Rice et al. (OOPSLA 
 'the probability of an argument selection defect increases markedly when methods have more \
 than five arguments'. Group related values into a struct or use a builder. Trait \
 implementations and `extern` functions are skipped because their signature is dictated \
-elsewhere.",
+elsewhere. Verified by our mining: each standard deviation of (log) parameter count raised the odds of a later bug fix by 11% beyond size (OR 1.11, 95% CI 1.04-1.18, p = 0.002); the effect is modest, so this is reported as info.",
     sources: &[
         "Rice, Aftandilian, Jaspan, Johnston, Pradel, Arroyo-Paredes. Detecting argument selection defects. OOPSLA 2017 (PACMPL 1, art. 104).",
         "Clippy lint `too_many_arguments` (default 7).",
@@ -90,11 +90,11 @@ static BOOLS: RuleMeta = RuleMeta {
     category: Category::Maintainability,
     severity: Severity::Info,
     evidence: Evidence::Weak,
-    default_enabled: true,
+    default_enabled: false,
     summary: "Function takes two or more `bool` parameters",
     rationale: "A call like `render(true, false)` cannot be read without looking up the signature, \
 and swapping the arguments compiles. The Rust API Guidelines (C-CUSTOM-TYPE) recommend enums or \
-dedicated types instead of `bool` arguments. Clippy has `fn_params_excessive_bools` (pedantic).",
+dedicated types instead of `bool` arguments. Clippy has `fn_params_excessive_bools` (pedantic). Not verified: no significant association with bug fixes (OR 1.22, p = 0.45).",
     sources: &[
         "Rust API Guidelines, C-CUSTOM-TYPE: https://rust-lang.github.io/api-guidelines/type-safety.html#c-custom-type",
         "Clippy lint `fn_params_excessive_bools`.",
@@ -132,7 +132,11 @@ impl Rule for DeepNesting {
     fn check(&self, input: &Input, sink: &mut Sink) {
         let max = input.config.max_nesting;
         for f in input.fns.iter().filter(|f| !f.is_test && f.max_nesting > max) {
-            sink.emit(f.line, f.column, format!("`{}` nests control flow {} levels deep (max {max})", f.name, f.max_nesting));
+            sink.emit(
+                f.line,
+                f.column,
+                format!("`{}` nests control flow {} levels deep (max {max})", f.name, f.max_nesting),
+            );
         }
     }
 }

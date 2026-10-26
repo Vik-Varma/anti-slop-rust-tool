@@ -36,13 +36,13 @@ static PTR_ARG: RuleMeta = RuleMeta {
     id: "ptr-arg",
     category: Category::Maintainability,
     severity: Severity::Info,
-    evidence: Evidence::Moderate,
-    default_enabled: true,
+    evidence: Evidence::Weak,
+    default_enabled: false,
     summary: "Parameter of type `&Vec<T>`, `&String`, `&PathBuf` or `&Box<T>`",
     rationale: "`&[T]`, `&str`, `&Path` and `&T` accept strictly more callers (arrays, slices, \
 literals, borrowed data) and avoid a double indirection. Clippy `ptr_arg` (style, warn by \
 default); Rust Design Patterns idiom 'Use borrowed types for arguments'; API Guidelines \
-C-GENERIC. Trait implementations are skipped.",
+C-GENERIC. Trait implementations are skipped. Opt-in: our benchmark found no measurable speed difference between `&Vec<T>` and `&[T]` parameters, and no association with bug fixes; the benefit is API flexibility only.",
     sources: &[
         "Clippy lint `ptr_arg`.",
         "Rust Design Patterns, 'Use borrowed types for arguments': https://rust-unofficial.github.io/patterns/idioms/coercion-arguments.html",
@@ -53,14 +53,16 @@ static DENY_WARNINGS: RuleMeta = RuleMeta {
     id: "deny-warnings",
     category: Category::Maintainability,
     severity: Severity::Warning,
-    evidence: Evidence::Moderate,
+    evidence: Evidence::Strong,
     default_enabled: true,
     summary: "`#![deny(warnings)]` in source code",
     rationale: "New compiler versions add lints and deprecations, so a crate that denies all \
 warnings in source stops compiling for users when the toolchain updates, opting out of Rust's \
 stability guarantees. Rust Design Patterns lists it as an anti-pattern; use \
-`RUSTFLAGS=\"-D warnings\"` in CI or deny specific lints instead.",
-    sources: &["Rust Design Patterns, '#![deny(warnings)]': https://rust-unofficial.github.io/patterns/anti_patterns/deny-warnings.html"],
+`RUSTFLAGS=\"-D warnings\"` in CI or deny specific lints instead. Verified: tests/demonstrations.rs shows a downstream crate failing to compile after a dependency deprecates a function.",
+    sources: &[
+        "Rust Design Patterns, '#![deny(warnings)]': https://rust-unofficial.github.io/patterns/anti_patterns/deny-warnings.html",
+    ],
 };
 
 /// Is the decimal float literal exactly representable as an f64 (or f32)?
@@ -128,15 +130,15 @@ impl Rule for FloatEquality {
         }
         impl<'ast> Visit<'ast> for V<'_, '_, '_> {
             fn visit_expr_binary(&mut self, b: &'ast syn::ExprBinary) {
-                if matches!(b.op, BinOp::Eq(_) | BinOp::Ne(_)) {
-                    if let Some(lit) = float_literal(&b.left).or_else(|| float_literal(&b.right)) {
-                        let is_f32 = lit.suffix() == "f32";
-                        if !exactly_representable(&lit.to_string(), is_f32) {
-                            self.sink.emit_span(
+                if matches!(b.op, BinOp::Eq(_) | BinOp::Ne(_))
+                    && let Some(lit) = float_literal(&b.left).or_else(|| float_literal(&b.right))
+                {
+                    let is_f32 = lit.suffix() == "f32";
+                    if !exactly_representable(&lit.to_string(), is_f32) {
+                        self.sink.emit_span(
                                 b.op.span(),
                                 format!("exact comparison with `{lit}`, which is not representable in binary floating point; compare with a tolerance"),
                             );
-                        }
                     }
                 }
                 visit::visit_expr_binary(self, b);
@@ -186,10 +188,13 @@ impl Rule for PtrArg {
                 }
                 for arg in &sig.inputs {
                     let FnArg::Typed(pt) = arg else { continue };
-                    if let Some((have, want)) = ptr_arg_suggestion(&pt.ty) {
-                        if self.ctx.is_production_line(pt.ty.span().start().line) {
-                            self.sink.emit_span(pt.ty.span(), format!("parameter takes `{have}`; `{want}` accepts more callers"));
-                        }
+                    if let Some((have, want)) = ptr_arg_suggestion(&pt.ty)
+                        && self.ctx.is_production_line(pt.ty.span().start().line)
+                    {
+                        self.sink.emit_span(
+                            pt.ty.span(),
+                            format!("parameter takes `{have}`; `{want}` accepts more callers"),
+                        );
                     }
                 }
             }
@@ -239,7 +244,10 @@ impl Rule for DenyWarnings {
             let Ok(list) = attr.meta.require_list() else { continue };
             let lints = list.tokens.to_string();
             if lints.split(|c: char| c == ',' || c.is_whitespace()).any(|l| l == "warnings") {
-                sink.emit_span(attr.span(), "`#![deny(warnings)]` breaks the build on new compiler warnings; deny in CI instead");
+                sink.emit_span(
+                    attr.span(),
+                    "`#![deny(warnings)]` breaks the build on new compiler warnings; deny in CI instead",
+                );
             }
         }
     }

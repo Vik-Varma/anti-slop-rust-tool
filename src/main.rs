@@ -45,9 +45,7 @@ enum Command {
         fail_on: Option<Severity>,
     },
     /// Print per-function metrics (size, complexity, nesting) as JSON lines.
-    Metrics {
-        paths: Vec<PathBuf>,
-    },
+    Metrics { paths: Vec<PathBuf> },
     /// List all rules.
     Rules,
     /// Explain a rule: what it flags, why, and the supporting evidence.
@@ -96,9 +94,8 @@ fn main() -> ExitCode {
                 Format::Text => print_text(&reports),
                 Format::Json => print_json(&reports),
             }
-            let failed = fail_on.is_some_and(|level| {
-                reports.iter().flat_map(|r| &r.findings).any(|f| f.severity >= level)
-            });
+            let failed =
+                fail_on.is_some_and(|level| reports.iter().flat_map(|r| &r.findings).any(|f| f.severity >= level));
             if failed { ExitCode::from(1) } else { ExitCode::SUCCESS }
         }
         Command::Metrics { paths } => {
@@ -120,12 +117,17 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Command::Rules => {
+            println!("{:<26} {:<16} {:<8} {:<9} SUMMARY", "RULE", "CATEGORY", "SEVERITY", "EVIDENCE");
             for r in rules::all_rules() {
                 let m = r.meta();
                 let opt = if m.default_enabled { "" } else { " (opt-in)" };
                 println!(
-                    "{:<28} {:<16} {:<8} evidence: {:<8} {}{opt}",
-                    m.id, m.category, m.severity, m.evidence, m.summary
+                    "{:<26} {:<16} {:<8} {:<9} {}{opt}",
+                    m.id,
+                    m.category.to_string(),
+                    m.severity.to_string(),
+                    m.evidence.to_string(),
+                    m.summary
                 );
             }
             ExitCode::SUCCESS
@@ -170,15 +172,7 @@ fn print_text(reports: &[FileReport]) {
         for f in &r.findings {
             total += 1;
             by_sev[f.severity as usize] += 1;
-            println!(
-                "{}:{}:{}: {}[{}] {}",
-                f.file.display(),
-                f.line,
-                f.column,
-                f.severity,
-                f.rule,
-                f.message
-            );
+            println!("{}:{}:{}: {}[{}] {}", f.file.display(), f.line, f.column, f.severity, f.rule, f.message);
         }
     }
     eprintln!(

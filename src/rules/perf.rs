@@ -28,7 +28,7 @@ Performance Book: 'You should avoid calling collect if the collection is then on
 again.' Our benchmark measured the cost. Only the immediate-chain form is flagged, because \
 Clippy's broader `needless_collect` was demoted for false positives (collecting is sometimes \
 needed to end a borrow, and `.collect::<Vec<_>>().into_iter()` can be needed for `.rev()` or \
-`ExactSizeIterator`).",
+`ExactSizeIterator`). Measured: 1.9-4.3x slower for `.len()` and up to 88x for `.is_empty()` (validation/results/benchmarks.md).",
     sources: &[
         "N. Nethercote. The Rust Performance Book, 'Iterators': https://nnethercote.github.io/perf-book/iterators.html",
         "Clippy lint `needless_collect` (nursery since 1.67, PR #9705).",
@@ -40,13 +40,13 @@ static FORMAT_PUSH: RuleMeta = RuleMeta {
     id: "format-push-string",
     category: Category::Performance,
     severity: Severity::Info,
-    evidence: Evidence::Moderate,
+    evidence: Evidence::Strong,
     default_enabled: true,
     summary: "`s.push_str(&format!(..))` / `s += &format!(..)` allocates a temporary String",
     rationale: "`format!` allocates a new `String` that is copied into `s` and freed. \
 `write!(s, ..)` (with `std::fmt::Write`) formats directly into the existing buffer. Clippy \
 `format_push_string`: 'Introduces an extra, avoidable heap allocation.' The saving is real but \
-modest (see benchmark), so this is reported as info.",
+modest (see benchmark), so this is reported as info. Measured: 2.1x slower than `write!` for 1000 appends.",
     sources: &[
         "Clippy lint `format_push_string`.",
         "validation/benches/benches/patterns.rs::format_push_string (this repository)",
@@ -66,7 +66,7 @@ reference without the copy. The Rust Design Patterns book lists 'clone to satisf
 checker' as an anti-pattern, and the Perf Book notes unnecessary clones arise from 'programmer \
 error, or changes in the code that render previously-necessary clone calls unnecessary'. Not \
 reported when the cloned value shares a root with the call's receiver or a `&mut` argument, \
-where the clone may be needed to end a borrow.",
+where the clone may be needed to end a borrow. Measured: 13x slower for a 64-byte String, 74x for a 1000-element Vec.",
     sources: &[
         "Rust Design Patterns, 'Clone to satisfy the borrow checker': https://rust-unofficial.github.io/patterns/anti_patterns/borrow_clone.html",
         "The Rust Performance Book, 'Heap Allocations': https://nnethercote.github.io/perf-book/heap-allocations.html",
@@ -83,7 +83,7 @@ static REDUNDANT_BOX: RuleMeta = RuleMeta {
     summary: "`Box<Vec<T>>`, `Box<String>`, `Box<HashMap<..>>`: a second, useless heap indirection",
     rationale: "Collections already store their contents on the heap; boxing them adds an extra \
 allocation and pointer chase for no benefit. Clippy `box_collection` (perf group): 'you just add \
-another level of indirection without any benefit whatsoever.'",
+another level of indirection without any benefit whatsoever.' Measured: construction 1.9x slower, element reads 1.18x slower.",
     sources: &[
         "Clippy lint `box_collection` (perf).",
         "validation/benches/benches/patterns.rs::redundant_box (this repository)",
@@ -101,7 +101,7 @@ static EAGER: RuleMeta = RuleMeta {
 fallback is not used, so an allocation is paid on every call, including the common success \
 path. The `_else` variants take a closure and only allocate when needed. The Perf Book: 'err is \
 computed eagerly. If its computation is expensive, you should instead use Option::ok_or_else'. \
-Only allocating arguments are flagged (`String::new()`/`Vec::new()` are free).",
+Only allocating arguments are flagged (`String::new()`/`Vec::new()` are free). Measured: about 12 ns of wasted allocation per call on the success path.",
     sources: &[
         "The Rust Performance Book, 'Standard Library Types': https://nnethercote.github.io/perf-book/standard-library-types.html",
         "validation/benches/benches/patterns.rs::eager_fallback (this repository)",
@@ -170,7 +170,10 @@ impl Rule for NeedlessCollect {
             };
             let Expr::MethodCall(inner) = peel(&outer.receiver) else { return };
             if inner.method == "collect" && turbofish_is_vec(inner) {
-                out.push((inner.method.span(), format!("collected into a Vec only to call `.{}()`; {suggestion}", outer.method)));
+                out.push((
+                    inner.method.span(),
+                    format!("collected into a Vec only to call `.{}()`; {suggestion}", outer.method),
+                ));
             }
         });
     }
@@ -191,7 +194,10 @@ impl Rule for FormatPushString {
     fn check(&self, input: &Input, sink: &mut Sink) {
         walk(input, sink, |e, out| match e {
             Expr::MethodCall(m) if m.method == "push_str" && m.args.len() == 1 && is_format_macro(&m.args[0]) => {
-                out.push((m.method.span(), "`push_str(&format!(..))` allocates a temporary; use `write!(s, ..)`".into()));
+                out.push((
+                    m.method.span(),
+                    "`push_str(&format!(..))` allocates a temporary; use `write!(s, ..)`".into(),
+                ));
             }
             Expr::Binary(b) if matches!(b.op, syn::BinOp::AddAssign(_)) && is_format_macro(&b.right) => {
                 out.push((b.op.span(), "`+= &format!(..)` allocates a temporary; use `write!(s, ..)`".into()));
@@ -256,7 +262,12 @@ impl Rule for BorrowedClone {
                 }
                 out.push((
                     m.method.span(),
-                    format!("`&{}.{}()` copies the value only to borrow it; pass `&{}`", expr_key(&m.receiver), m.method, expr_key(&m.receiver)),
+                    format!(
+                        "`&{}.{}()` copies the value only to borrow it; pass `&{}`",
+                        expr_key(&m.receiver),
+                        m.method,
+                        expr_key(&m.receiver)
+                    ),
                 ));
             }
         });
@@ -276,23 +287,18 @@ impl Rule for RedundantBox {
         }
         impl<'ast> Visit<'ast> for V<'_, '_, '_> {
             fn visit_type_path(&mut self, tp: &'ast syn::TypePath) {
-                if let Some(seg) = tp.path.segments.last() {
-                    if seg.ident == "Box" {
-                        if let PathArguments::AngleBracketed(args) = &seg.arguments {
-                            if let Some(GenericArgument::Type(Type::Path(inner))) = args.args.first() {
-                                if let Some(inner_seg) = inner.path.segments.last() {
-                                    let name = inner_seg.ident.to_string();
-                                    if COLLECTIONS.contains(&name.as_str())
-                                        && self.ctx.is_production_line(tp.span().start().line)
-                                    {
-                                        self.sink.emit_span(
-                                            tp.span(),
-                                            format!("`Box<{name}<..>>` double-boxes a heap collection; use `{name}` directly"),
-                                        );
-                                    }
-                                }
-                            }
-                        }
+                if let Some(seg) = tp.path.segments.last()
+                    && seg.ident == "Box"
+                    && let PathArguments::AngleBracketed(args) = &seg.arguments
+                    && let Some(GenericArgument::Type(Type::Path(inner))) = args.args.first()
+                    && let Some(inner_seg) = inner.path.segments.last()
+                {
+                    let name = inner_seg.ident.to_string();
+                    if COLLECTIONS.contains(&name.as_str()) && self.ctx.is_production_line(tp.span().start().line) {
+                        self.sink.emit_span(
+                            tp.span(),
+                            format!("`Box<{name}<..>>` double-boxes a heap collection; use `{name}` directly"),
+                        );
                     }
                 }
                 visit::visit_type_path(self, tp);

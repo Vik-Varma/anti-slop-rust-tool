@@ -19,10 +19,7 @@ pub enum FileKind {
 
 impl FileKind {
     pub fn from_path(path: &Path) -> FileKind {
-        let comps: Vec<String> = path
-            .components()
-            .map(|c| c.as_os_str().to_string_lossy().into_owned())
-            .collect();
+        let comps: Vec<String> = path.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
         let file_name = comps.last().map(String::as_str).unwrap_or("");
         let dirs = &comps[..comps.len().saturating_sub(1)];
         if file_name == "build.rs" {
@@ -112,9 +109,7 @@ impl<'a> FileContext<'a> {
         if self.suppressed_file.contains(rule) || self.suppressed_file.contains("*") {
             return true;
         }
-        self.suppressed_lines
-            .get(&line)
-            .is_some_and(|ids| ids.contains(rule) || ids.contains("*"))
+        self.suppressed_lines.get(&line).is_some_and(|ids| ids.contains(rule) || ids.contains("*"))
     }
 
     pub fn line_text(&self, line: usize) -> &str {

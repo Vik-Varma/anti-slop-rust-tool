@@ -105,10 +105,11 @@ fn count_params(sig: &Signature) -> (usize, usize) {
     for arg in &sig.inputs {
         if let FnArg::Typed(pt) = arg {
             params += 1;
-            if let Type::Path(tp) = &*pt.ty {
-                if tp.qself.is_none() && tp.path.is_ident("bool") {
-                    bools += 1;
-                }
+            if let Type::Path(tp) = &*pt.ty
+                && tp.qself.is_none()
+                && tp.path.is_ident("bool")
+            {
+                bools += 1;
             }
         }
     }
@@ -231,20 +232,18 @@ impl Complexity {
     }
 
     fn visit_logical(&mut self, e: &Expr, parent_op: Option<&BinOp>) {
-        if let Expr::Binary(b) = e {
-            if matches!(b.op, BinOp::And(_) | BinOp::Or(_)) {
-                let same_as_parent = matches!(
-                    (parent_op, &b.op),
-                    (Some(BinOp::And(_)), BinOp::And(_)) | (Some(BinOp::Or(_)), BinOp::Or(_))
-                );
-                if !same_as_parent {
-                    self.cognitive += 1;
-                }
-                self.cyclomatic += 1;
-                self.visit_logical(&b.left, Some(&b.op));
-                self.visit_logical(&b.right, Some(&b.op));
-                return;
+        if let Expr::Binary(b) = e
+            && matches!(b.op, BinOp::And(_) | BinOp::Or(_))
+        {
+            let same_as_parent =
+                matches!((parent_op, &b.op), (Some(BinOp::And(_)), BinOp::And(_)) | (Some(BinOp::Or(_)), BinOp::Or(_)));
+            if !same_as_parent {
+                self.cognitive += 1;
             }
+            self.cyclomatic += 1;
+            self.visit_logical(&b.left, Some(&b.op));
+            self.visit_logical(&b.right, Some(&b.op));
+            return;
         }
         self.visit_expr(e);
     }
@@ -338,21 +337,21 @@ impl<'ast> Visit<'ast> for Complexity {
     }
 
     fn visit_expr_call(&mut self, c: &'ast syn::ExprCall) {
-        if let Expr::Path(p) = &*c.func {
-            if p.path.segments.len() == 1 && p.path.is_ident(&self.fn_name) {
-                self.cognitive += 1;
-            }
+        if let Expr::Path(p) = &*c.func
+            && p.path.segments.len() == 1
+            && p.path.is_ident(&self.fn_name)
+        {
+            self.cognitive += 1;
         }
         visit::visit_expr_call(self, c);
     }
 
     fn visit_expr_method_call(&mut self, m: &'ast syn::ExprMethodCall) {
-        if m.method == self.fn_name {
-            if let Expr::Path(p) = &*m.receiver {
-                if p.path.is_ident("self") {
-                    self.cognitive += 1;
-                }
-            }
+        if m.method == self.fn_name
+            && let Expr::Path(p) = &*m.receiver
+            && p.path.is_ident("self")
+        {
+            self.cognitive += 1;
         }
         visit::visit_expr_method_call(self, m);
     }
@@ -432,7 +431,9 @@ fn get_words(number: i32) -> &'static str {
 
     #[test]
     fn boolean_sequences() {
-        let m = metrics("fn f(a: bool, b: bool, c: bool) -> bool { if a && b && c { true } else if a || b && c { false } else { a } }");
+        let m = metrics(
+            "fn f(a: bool, b: bool, c: bool) -> bool { if a && b && c { true } else if a || b && c { false } else { a } }",
+        );
         // if:+1, `a && b && c`:+1, else if:+1, `a || b && c`:+2, else:+1
         assert_eq!(m[0].cognitive, 6);
     }
@@ -449,7 +450,9 @@ fn get_words(number: i32) -> &'static str {
 
     #[test]
     fn methods_get_type_scope_and_skip_self() {
-        let m = metrics("struct S; impl S { fn m(&self, x: u8) {} }\ntrait T { fn d(&self) {} }\nimpl T for S { fn d(&self) {} }");
+        let m = metrics(
+            "struct S; impl S { fn m(&self, x: u8) {} }\ntrait T { fn d(&self) {} }\nimpl T for S { fn d(&self) {} }",
+        );
         assert_eq!(m[0].qual_name, "S::m");
         assert_eq!(m[0].params, 1);
         assert!(!m[0].is_trait_impl);

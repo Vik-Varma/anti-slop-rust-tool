@@ -25,7 +25,7 @@ program deadlocks (reproduced in tests/demonstrations.rs). The Tokio docs: holdi
 across `.await` 'virtually never leads to correct concurrent code in practice as it can easily \
 lead to deadlocks'. Clippy `await_holding_lock` (suspicious). Fix: drop the guard in an inner \
 scope before awaiting, or use an async mutex if the lock really must span the await. Note that \
-using std `Mutex` in async code is otherwise fine (and preferred by Tokio).",
+using std `Mutex` in async code is otherwise fine (and preferred by Tokio). Verified: deadlock reproduced in tests/demonstrations.rs (a control that drops the guard first completes).",
     sources: &[
         "Tokio Mutex docs: https://docs.rs/tokio/latest/tokio/sync/struct.Mutex.html",
         "Tokio tutorial 'Shared state': https://tokio.rs/tokio/tutorial/shared-state",
@@ -49,7 +49,7 @@ Redox, ...): 38 involved Mutex/RwLock and 30 of those were double locks, typical
 misjudging how long a guard lives (6 with the first lock in a `match` scrutinee); 21 were fixed \
 by shortening the guard's lifetime, and Clippy caught none. Bind the value with `let` first so \
 the guard is dropped before the body. (A plain `if` condition drops its temporaries before the \
-body and is not flagged.)",
+body and is not flagged.) Verified: deadlock reproduced in tests/demonstrations.rs.",
     sources: &[
         "Qin, Chen, Yu, Song, Zhang. Understanding Memory and Thread Safety Practices and Issues in Real-World Rust Programs. PLDI 2020. doi:10.1145/3385412.3386036",
         "Clippy lint `significant_drop_in_scrutinee` (nursery).",
@@ -69,7 +69,7 @@ on that thread (reproduced in tests/demonstrations.rs: one `std::thread::sleep` 
 unrelated task by the full sleep). Tokio's docs: 'code running in asynchronous tasks should not \
 perform operations that can block'. `blocking_lock`/`blocking_recv`/`block_on` panic outright \
 when called from within a runtime. Use the async equivalent (`tokio::time::sleep`, `tokio::fs`) \
-or `spawn_blocking`.",
+or `spawn_blocking`. Verified: in tests/demonstrations.rs a 10 ms timer fires after ~300 ms when another task calls std::thread::sleep(300 ms), versus ~11 ms with tokio::time::sleep.",
     sources: &[
         "Tokio task docs, 'Blocking and Yielding': https://docs.rs/tokio/latest/tokio/task/index.html",
         "A. Ryhl. Async: What is blocking? https://ryhl.io/blog/async-what-is-blocking/",
@@ -164,13 +164,12 @@ impl<'ast> Visit<'ast> for AwaitFinder {
         }
     }
     fn visit_expr_call(&mut self, c: &'ast syn::ExprCall) {
-        if let (Expr::Path(f), Some(name)) = (&*c.func, &self.dropped_name) {
-            if f.path.segments.last().is_some_and(|s| s.ident == "drop")
-                && c.args.len() == 1
-                && expr_key(&c.args[0]) == *name
-            {
-                self.dropped = true;
-            }
+        if let (Expr::Path(f), Some(name)) = (&*c.func, &self.dropped_name)
+            && f.path.segments.last().is_some_and(|s| s.ident == "drop")
+            && c.args.len() == 1
+            && expr_key(&c.args[0]) == *name
+        {
+            self.dropped = true;
         }
         visit::visit_expr_call(self, c);
     }
@@ -241,7 +240,10 @@ impl AcrossAwait<'_, '_, '_> {
             if self.ctx.is_production_line(line) {
                 self.sink.emit_span(
                     call.method.span(),
-                    format!("guard from `.{}()` in the scrutinee lives across the `.await` on line {line}", call.method),
+                    format!(
+                        "guard from `.{}()` in the scrutinee lives across the `.await` on line {line}",
+                        call.method
+                    ),
                 );
             }
         }
@@ -317,10 +319,10 @@ impl<'ast> Visit<'ast> for AcrossAwait<'_, '_, '_> {
         visit::visit_expr_match(self, m);
     }
     fn visit_expr_if(&mut self, i: &'ast syn::ExprIf) {
-        if self.in_async {
-            if let Expr::Let(l) = &*i.cond {
-                self.check_scrutinee(&l.expr, &|f: &mut AwaitFinder| f.visit_block(&i.then_branch));
-            }
+        if self.in_async
+            && let Expr::Let(l) = &*i.cond
+        {
+            self.check_scrutinee(&l.expr, &|f: &mut AwaitFinder| f.visit_block(&i.then_branch));
         }
         visit::visit_expr_if(self, i);
     }
@@ -355,16 +357,16 @@ impl Scrutinee<'_, '_, '_> {
         }
         for body in bodies {
             for (key, span) in lock_calls(body, true) {
-                if let Some((_, first)) = held.iter().find(|(k, _)| *k == key) {
-                    if self.ctx.is_production_line(span.start().line) {
-                        self.sink.emit_span(
+                if let Some((_, first)) = held.iter().find(|(k, _)| *k == key)
+                    && self.ctx.is_production_line(span.start().line)
+                {
+                    self.sink.emit_span(
                             span,
                             format!(
                                 "`{key}` is locked again while the guard from line {} (scrutinee) is still alive; this deadlocks",
                                 first.start().line
                             ),
                         );
-                    }
                 }
             }
         }
@@ -414,9 +416,23 @@ impl Rule for LockInScrutinee {
 }
 
 const STD_FS_FNS: &[&str] = &[
-    "read", "read_to_string", "write", "read_dir", "create_dir", "create_dir_all", "remove_file",
-    "remove_dir", "remove_dir_all", "copy", "rename", "metadata", "canonicalize", "hard_link",
-    "read_link", "set_permissions", "symlink_metadata",
+    "read",
+    "read_to_string",
+    "write",
+    "read_dir",
+    "create_dir",
+    "create_dir_all",
+    "remove_file",
+    "remove_dir",
+    "remove_dir_all",
+    "copy",
+    "rename",
+    "metadata",
+    "canonicalize",
+    "hard_link",
+    "read_link",
+    "set_permissions",
+    "symlink_metadata",
 ];
 const BLOCKING_METHODS: &[&str] =
     &["blocking_lock", "blocking_recv", "blocking_send", "blocking_read", "blocking_write", "block_on"];
@@ -441,9 +457,7 @@ impl Blocking<'_, '_, '_> {
         let full: Vec<&str> = full.iter().map(String::as_str).collect();
         let joined = full.join("::");
         match full.as_slice() {
-            ["std", "thread", "sleep"] | ["thread", "sleep"] => {
-                Some(("use `tokio::time::sleep(..).await`", joined))
-            }
+            ["std", "thread", "sleep"] | ["thread", "sleep"] => Some(("use `tokio::time::sleep(..).await`", joined)),
             ["std", "fs", f] if STD_FS_FNS.contains(f) => Some(("use `tokio::fs` or `spawn_blocking`", joined)),
             ["std", "fs", "File", "open" | "create"] => Some(("use `tokio::fs::File` or `spawn_blocking`", joined)),
             ["std", "net", "TcpStream" | "TcpListener" | "UdpSocket", "connect" | "bind"] => {

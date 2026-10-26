@@ -27,7 +27,7 @@ static TODO: RuleMeta = RuleMeta {
 present in production code.' A function whose entire body is `unimplemented!()` is a stub. \
 `unimplemented!()` in a single match arm is not reported: the std docs note it makes no claim \
 that the code will be written and it commonly marks deliberately unsupported cases. Unfinished \
-stubs are also a hallmark of machine-generated code that was never completed. Allowed in tests.",
+stubs are also a hallmark of machine-generated code that was never completed. Allowed in tests. Verified: tests/demonstrations.rs shows the panic when reached.",
     sources: &[
         "Clippy lints `todo`, `unimplemented`.",
         "tests/demonstrations.rs::todo_panics_when_reached (this repository)",
@@ -38,7 +38,7 @@ static UNWRAP_RESULT: RuleMeta = RuleMeta {
     id: "unwrap-in-result-fn",
     category: Category::Robustness,
     severity: Severity::Warning,
-    evidence: Evidence::Strong,
+    evidence: Evidence::Moderate,
     default_enabled: true,
     summary: "`.unwrap()` inside a function that already returns `Result`/`Option`",
     rationale: "The function has an error channel, yet this call turns a recoverable error into a \
@@ -49,7 +49,7 @@ crash; `?` (or `.ok_or(..)?`) would propagate it instead. This is the shape of C
 Exempt: `.lock().unwrap()` (idiomatic poison propagation per the std docs), \
 `.join().unwrap()` (propagates a thread's panic), unwraps of calls whose arguments are all \
 literals (e.g. `\"127.0.0.1\".parse().unwrap()`), code inside closures, and tests. `.expect(..)` is \
-not flagged: the Rust Book recommends it for documenting why failure is impossible.",
+not flagged: the Rust Book recommends it for documenting why failure is impossible. Verified: tests/demonstrations.rs shows the crash where `?` would return an error. Our mining of 22 repositories found no association with later bug-fix frequency (size-adjusted OR 1.06, p = 0.87): the cost is the severity of the failure (a crash), not how often it happens.",
     sources: &[
         "Cloudflare, '18 November 2025 outage': https://blog.cloudflare.com/18-november-2025-outage/",
         "Clippy lint `unwrap_in_result`.",
@@ -63,11 +63,11 @@ static UNWRAP_USED: RuleMeta = RuleMeta {
     severity: Severity::Info,
     evidence: Evidence::Weak,
     default_enabled: false,
-    summary: "`.unwrap()` in production code (opt-in)",
+    summary: "`.unwrap()` in production code",
     rationale: "Every `.unwrap()` is a potential crash. However, unwrapping on a checked invariant \
 is idiomatic (BurntSushi, 'Using unwrap() in Rust is Okay'), Clippy keeps `unwrap_used` in the \
 restriction group, and our mining study found no association with later bug fixes once \
-function size is controlled. Opt-in for codebases that ban panics.",
+function size is controlled. Opt-in for codebases that ban panics. Not verified: in our mining, functions containing unwrap were not more often bug-fixed once size was controlled (OR 1.17, p = 0.24).",
     sources: &[
         "Clippy lint `unwrap_used` (restriction).",
         "A. Gallant. Using unwrap() in Rust is Okay. https://burntsushi.net/unwrap/",
@@ -97,7 +97,7 @@ static DROP: RuleMeta = RuleMeta {
     rationale: "Destructors run during unwinding; a panic in `drop` while another panic is in \
 flight aborts the whole process (reproduced in tests/demonstrations.rs). The API Guidelines \
 (C-DTOR-FAIL) say destructors must never fail and suggest a separate `close()` method returning \
-`Result`. Skipped when the body checks `std::thread::panicking()`.",
+`Result`. Skipped when the body checks `std::thread::panicking()`. Verified: the abort (SIGABRT) is reproduced in tests/demonstrations.rs.",
     sources: &[
         "Rust API Guidelines, C-DTOR-FAIL: https://rust-lang.github.io/api-guidelines/dependability.html#c-dtor-fail",
         "tests/demonstrations.rs::panic_in_drop_during_unwind_aborts (this repository)",
@@ -108,27 +108,20 @@ static EXIT: RuleMeta = RuleMeta {
     id: "exit-in-library",
     category: Category::Robustness,
     severity: Severity::Info,
-    evidence: Evidence::Moderate,
+    evidence: Evidence::Strong,
     default_enabled: true,
     summary: "`std::process::exit` called from library code",
     rationale: "`process::exit` ends the process without running destructors (buffered writers \
 are not flushed, temp files not removed) and takes the decision away from the application \
 embedding the library. Return an error instead. Clippy `exit` (restriction) and the std docs \
-note that no destructors run.",
-    sources: &[
-        "std::process::exit docs: https://doc.rust-lang.org/std/process/fn.exit.html",
-        "Clippy lint `exit`.",
-    ],
+note that no destructors run. Verified: tests/demonstrations.rs shows a `BufWriter`'s data lost when `process::exit` runs before it is dropped.",
+    sources: &["std::process::exit docs: https://doc.rust-lang.org/std/process/fn.exit.html", "Clippy lint `exit`."],
 };
 
 fn returns_result_or_option(ret: &ReturnType) -> bool {
     let ReturnType::Type(_, ty) = ret else { return false };
     match &**ty {
-        Type::Path(tp) => tp
-            .path
-            .segments
-            .last()
-            .is_some_and(|s| s.ident == "Result" || s.ident == "Option"),
+        Type::Path(tp) => tp.path.segments.last().is_some_and(|s| s.ident == "Result" || s.ident == "Option"),
         _ => false,
     }
 }
@@ -344,7 +337,10 @@ impl<'ast> Visit<'ast> for PanicSites {
     }
     fn visit_macro(&mut self, mac: &'ast syn::Macro) {
         let name = macro_name(mac);
-        if matches!(name.as_str(), "panic" | "assert" | "assert_eq" | "assert_ne" | "unreachable" | "todo" | "unimplemented") {
+        if matches!(
+            name.as_str(),
+            "panic" | "assert" | "assert_eq" | "assert_ne" | "unreachable" | "todo" | "unimplemented"
+        ) {
             self.sites.push((mac.path.span(), format!("`{name}!`")));
         }
         if let Some(exprs) = macro_exprs(mac) {
@@ -366,10 +362,8 @@ impl Rule for PanicInDrop {
         }
         impl<'ast> Visit<'ast> for ImplFinder<'_, '_, '_> {
             fn visit_item_impl(&mut self, i: &'ast syn::ItemImpl) {
-                let is_drop = i
-                    .trait_
-                    .as_ref()
-                    .is_some_and(|(_, p, _)| p.segments.last().is_some_and(|s| s.ident == "Drop"));
+                let is_drop =
+                    i.trait_.as_ref().is_some_and(|(_, p, _)| p.segments.last().is_some_and(|s| s.ident == "Drop"));
                 if is_drop {
                     for item in &i.items {
                         let syn::ImplItem::Fn(f) = item else { continue };
@@ -423,7 +417,8 @@ impl Rule for ExitInLibrary {
                         && !self.in_main
                         && self.ctx.is_production_line(p.span().start().line)
                     {
-                        self.sink.emit_span(p.span(), "`process::exit` in library code skips destructors; return an error");
+                        self.sink
+                            .emit_span(p.span(), "`process::exit` in library code skips destructors; return an error");
                     }
                 }
                 visit::visit_expr_call(self, c);

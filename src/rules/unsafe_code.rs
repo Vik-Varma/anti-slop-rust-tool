@@ -18,16 +18,16 @@ pub struct SetLenUninit;
 static UNDOCUMENTED: RuleMeta = RuleMeta {
     id: "undocumented-unsafe",
     category: Category::Correctness,
-    severity: Severity::Warning,
-    evidence: Evidence::Moderate,
-    default_enabled: true,
+    severity: Severity::Info,
+    evidence: Evidence::Weak,
+    default_enabled: false,
     summary: "`unsafe` block or impl without a `// SAFETY:` comment",
     rationale: "Every memory-safety bug in the PLDI 2020 study of real Rust programs involved \
 unsafe code, and soundness depends on invariants the compiler cannot check. The Rust standard \
 library requires that 'each unsafe block should have a SAFETY: comment explaining why the block \
 is safe, which invariants are used and must be respected'; Clippy (`undocumented_unsafe_blocks`) \
 and Effective Rust (Item 16) recommend the same. Writing the justification is how reviewers (and \
-authors) spot unsoundness. The comment may precede the statement or open the block.",
+authors) spot unsoundness. The comment may precede the statement or open the block. Opt-in: strong community consensus, but our mining could not verify a benefit: among functions containing unsafe blocks, undocumented ones were not more often bug-fixed than documented ones (size-adjusted OR 0.79, p = 0.65).",
     sources: &[
         "std-dev-guide, Safety comments policy: https://std-dev-guide.rust-lang.org/policy/safety-comments.html",
         "Clippy lint `undocumented_unsafe_blocks`.",
@@ -49,7 +49,7 @@ is accepted (as for `Mutex<T>`), since containers that only move values need no 
 missing Send/Sync bounds to be the most common pattern among memory-safety bugs in all Rust CVEs \
 (30 of 185 bugs), and Rudra (Bae et al., SOSP 2021) found 178 such bugs in crates.io. Type \
 parameters used only inside `PhantomData` (when the type is defined in the same file) are not \
-reported.",
+reported. Verified: Miri reports a data race for the flagged pattern and none for the bounded version (validation/ub).",
     sources: &[
         "Xu et al. Memory-Safety Challenge Considered Solved? An In-Depth Study with All Rust CVEs. ACM TOSEM 31(1), 2021. doi:10.1145/3466642",
         "Bae et al. Rudra: Finding Memory Safety Bugs in Rust at the Ecosystem Scale. SOSP 2021. doi:10.1145/3477132.3483570",
@@ -65,7 +65,7 @@ static UNINIT: RuleMeta = RuleMeta {
     summary: "`MaybeUninit::uninit().assume_init()` or `mem::uninitialized()`",
     rationale: "Asserting that never-initialised memory is initialised is undefined behaviour for \
 almost every type. `mem::uninitialized` is deprecated for this reason. Clippy \
-`uninit_assumed_init` is deny-by-default: 'For most types, this is undefined behavior.'",
+`uninit_assumed_init` is deny-by-default: 'For most types, this is undefined behavior.' Verified: Miri reports undefined behaviour (validation/ub).",
     sources: &[
         "std::mem::MaybeUninit docs: https://doc.rust-lang.org/std/mem/union.MaybeUninit.html",
         "Clippy lint `uninit_assumed_init` (correctness).",
@@ -83,11 +83,8 @@ static SET_LEN: RuleMeta = RuleMeta {
 elements, makes the vector's contents uninitialised memory; reading them (or passing the buffer \
 to a `Read` impl) is undefined behaviour. This uninitialised-`Vec` pattern was one of Rudra's \
 most productive bug classes (Bae et al., SOSP 2021) and became Clippy's deny-by-default \
-`uninit_vec` lint.",
-    sources: &[
-        "Bae et al. Rudra. SOSP 2021. doi:10.1145/3477132.3483570",
-        "Clippy lint `uninit_vec` (correctness).",
-    ],
+`uninit_vec` lint. Verified: Miri reports reading uninitialised memory (validation/ub).",
+    sources: &["Bae et al. Rudra. SOSP 2021. doi:10.1145/3477132.3483570", "Clippy lint `uninit_vec` (correctness)."],
 };
 
 /// Is there a comment mentioning safety above (or on) any of `lines`, or as the
@@ -189,8 +186,29 @@ fn is_phantom(ty: &syn::Type) -> bool {
 }
 
 const NON_AUTO_STD_TRAITS: &[&str] = &[
-    "Sized", "Clone", "Copy", "Debug", "Display", "Default", "PartialEq", "Eq", "PartialOrd", "Ord", "Hash",
-    "Unpin", "Future", "Iterator", "AsRef", "AsMut", "Borrow", "Into", "From", "Fn", "FnMut", "FnOnce", "Any",
+    "Sized",
+    "Clone",
+    "Copy",
+    "Debug",
+    "Display",
+    "Default",
+    "PartialEq",
+    "Eq",
+    "PartialOrd",
+    "Ord",
+    "Hash",
+    "Unpin",
+    "Future",
+    "Iterator",
+    "AsRef",
+    "AsMut",
+    "Borrow",
+    "Into",
+    "From",
+    "Fn",
+    "FnMut",
+    "FnOnce",
+    "Any",
 ];
 
 fn bound_names(bounds: &syn::punctuated::Punctuated<TypeParamBound, syn::Token![+]>) -> Vec<String> {
@@ -256,7 +274,8 @@ impl Rule for UnboundedSendSync {
                     // A bound on a crate-specific trait may carry `Send`/`Sync` as a supertrait,
                     // which we cannot see; only report parameters bounded by nothing or by std
                     // traits that are known not to imply it.
-                    let opaque = bounds.get(&p).is_some_and(|b| b.iter().any(|n| !NON_AUTO_STD_TRAITS.contains(&n.as_str())));
+                    let opaque =
+                        bounds.get(&p).is_some_and(|b| b.iter().any(|n| !NON_AUTO_STD_TRAITS.contains(&n.as_str())));
                     if has || opaque {
                         continue;
                     }
@@ -288,14 +307,14 @@ impl Rule for UninitMemory {
         }
         impl<'ast> Visit<'ast> for V<'_, '_, '_> {
             fn visit_expr_method_call(&mut self, m: &'ast syn::ExprMethodCall) {
-                if m.method == "assume_init" && self.sink.ctx().is_production_line(m.method.span().start().line) {
-                    if let Expr::Call(c) = &*m.receiver {
-                        if let Expr::Path(p) = &*c.func {
-                            if path_string(&p.path).ends_with("MaybeUninit::uninit") {
-                                self.sink.emit_span(m.method.span(), "`MaybeUninit::uninit().assume_init()` is undefined behaviour");
-                            }
-                        }
-                    }
+                if m.method == "assume_init"
+                    && self.sink.ctx().is_production_line(m.method.span().start().line)
+                    && let Expr::Call(c) = &*m.receiver
+                    && let Expr::Path(p) = &*c.func
+                    && path_string(&p.path).ends_with("MaybeUninit::uninit")
+                {
+                    self.sink
+                        .emit_span(m.method.span(), "`MaybeUninit::uninit().assume_init()` is undefined behaviour");
                 }
                 visit::visit_expr_method_call(self, m);
             }
@@ -303,7 +322,10 @@ impl Rule for UninitMemory {
                 if let Expr::Path(p) = &*c.func {
                     let path = path_string(&p.path);
                     if path == "mem::uninitialized" || path.ends_with("::mem::uninitialized") {
-                        self.sink.emit_span(p.span(), "`mem::uninitialized()` is deprecated and undefined behaviour for most types");
+                        self.sink.emit_span(
+                            p.span(),
+                            "`mem::uninitialized()` is deprecated and undefined behaviour for most types",
+                        );
                     }
                 }
                 visit::visit_expr_call(self, c);
@@ -321,8 +343,19 @@ impl Rule for UninitMemory {
 }
 
 const WRITES: &[&str] = &[
-    "as_mut_ptr", "spare_capacity_mut", "write", "copy_nonoverlapping", "copy_from_slice", "copy_to",
-    "copy_to_nonoverlapping", "write_bytes", "fill", "resize", "extend_from_slice", "push", "read",
+    "as_mut_ptr",
+    "spare_capacity_mut",
+    "write",
+    "copy_nonoverlapping",
+    "copy_from_slice",
+    "copy_to",
+    "copy_to_nonoverlapping",
+    "write_bytes",
+    "fill",
+    "resize",
+    "extend_from_slice",
+    "push",
+    "read",
 ];
 
 impl Rule for SetLenUninit {
@@ -347,10 +380,10 @@ impl Rule for SetLenUninit {
             }
             impl<'ast> Visit<'ast> for F<'_> {
                 fn visit_expr_call(&mut self, c: &'ast syn::ExprCall) {
-                    if let Expr::Path(p) = &*c.func {
-                        if p.path.segments.last().is_some_and(|s| self.names.iter().any(|n| s.ident == n)) {
-                            self.found = true;
-                        }
+                    if let Expr::Path(p) = &*c.func
+                        && p.path.segments.last().is_some_and(|s| self.names.iter().any(|n| s.ident == n))
+                    {
+                        self.found = true;
                     }
                     visit::visit_expr_call(self, c);
                 }
@@ -376,7 +409,10 @@ impl Rule for SetLenUninit {
                         let set_len_writes = stmt_expr(s).is_some_and(|e| contains_method_call(e, WRITES));
                         let line = s.span().start().line;
                         if prev_allocates && !set_len_writes && self.sink.ctx().is_production_line(line) {
-                            self.sink.emit_span(s.span(), "`set_len` right after allocating, before initialising the elements");
+                            self.sink.emit_span(
+                                s.span(),
+                                "`set_len` right after allocating, before initialising the elements",
+                            );
                         }
                         prev_allocates = false;
                     } else {

@@ -45,7 +45,7 @@ static IO_AMOUNT: RuleMeta = RuleMeta {
     rationale: "`Read::read` and `Write::write` may process fewer bytes than the buffer holds and \
 report how many they did. Discarding the count silently drops data on short reads/writes \
 (reproduced in tests/demonstrations.rs). Use `read_exact` / `write_all`. Clippy \
-`unused_io_amount` is in the correctness group (deny by default).",
+`unused_io_amount` is in the correctness group (deny by default). Verified: tests/demonstrations.rs shows a std writer performing a short write.",
     sources: &[
         "std::io::Write::write docs: https://doc.rust-lang.org/std/io/trait.Write.html#tymethod.write",
         "Clippy lint `unused_io_amount` (correctness).",
@@ -56,15 +56,17 @@ report how many they did. Discarding the count silently drops data on short read
 static UNIT_ERR: RuleMeta = RuleMeta {
     id: "unit-error-type",
     category: Category::Robustness,
-    severity: Severity::Warning,
-    evidence: Evidence::Moderate,
-    default_enabled: true,
+    severity: Severity::Info,
+    evidence: Evidence::Weak,
+    default_enabled: false,
     summary: "Public function returns `Result<_, ()>`",
     rationale: "A `()` error carries no information about what went wrong, implements neither \
 `Error` nor `Display`, and cannot be converted with `?` into callers' error types. The Rust API \
 Guidelines (C-GOOD-ERR): 'Never use () as an error type, even where there is no useful \
-additional information for the error to carry.'",
-    sources: &["Rust API Guidelines, C-GOOD-ERR: https://rust-lang.github.io/api-guidelines/interoperability.html#c-good-err"],
+additional information for the error to carry.' Opt-in: recommended by the API Guidelines, but we could not demonstrate a concrete failure.",
+    sources: &[
+        "Rust API Guidelines, C-GOOD-ERR: https://rust-lang.github.io/api-guidelines/interoperability.html#c-good-err",
+    ],
 };
 
 fn is_empty_body(e: &Expr) -> bool {
@@ -118,31 +120,30 @@ impl<'ast> Visit<'ast> for SwallowFinder<'_, '_, '_> {
     }
 
     fn visit_expr_if(&mut self, i: &'ast syn::ExprIf) {
-        if let Expr::Let(l) = &*i.cond {
-            if is_err_pattern(&l.pat)
-                && i.then_branch.stmts.is_empty()
-                && i.else_branch.is_none()
-                && !has_comment_within(self.ctx, l.pat.span().start().line, i.then_branch.span().end().line)
-            {
-                self.report(l.pat.span(), "`if let Err(..)` with an empty body discards the error");
-            }
+        if let Expr::Let(l) = &*i.cond
+            && is_err_pattern(&l.pat)
+            && i.then_branch.stmts.is_empty()
+            && i.else_branch.is_none()
+            && !has_comment_within(self.ctx, l.pat.span().start().line, i.then_branch.span().end().line)
+        {
+            self.report(l.pat.span(), "`if let Err(..)` with an empty body discards the error");
         }
         visit::visit_expr_if(self, i);
     }
 
     fn visit_stmt(&mut self, s: &'ast Stmt) {
-        if let Stmt::Expr(e, Some(_)) = s {
-            if let Expr::MethodCall(m) = peel(e) {
-                // `write!(string, ..).ok()` cannot fail for `String` and is a common idiom.
-                let on_write_macro = matches!(peel(&m.receiver), Expr::Macro(mac)
+        if let Stmt::Expr(e, Some(_)) = s
+            && let Expr::MethodCall(m) = peel(e)
+        {
+            // `write!(string, ..).ok()` cannot fail for `String` and is a common idiom.
+            let on_write_macro = matches!(peel(&m.receiver), Expr::Macro(mac)
                     if matches!(crate::ast_util::macro_name(&mac.mac).as_str(), "write" | "writeln"));
-                // Sending to a channel whose receiver may be gone, or setting a OnceCell,
-                // are deliberate fire-and-forget idioms (like `let _ = tx.send(..)`).
-                let fire_and_forget = matches!(peel(&m.receiver), Expr::MethodCall(inner)
+            // Sending to a channel whose receiver may be gone, or setting a OnceCell,
+            // are deliberate fire-and-forget idioms (like `let _ = tx.send(..)`).
+            let fire_and_forget = matches!(peel(&m.receiver), Expr::MethodCall(inner)
                     if matches!(inner.method.to_string().as_str(), "send" | "try_send" | "unbounded_send" | "set" | "post" | "send_replace"));
-                if m.method == "ok" && m.args.is_empty() && !on_write_macro && !fire_and_forget {
-                    self.report(m.method.span(), "`.ok();` silences the Result without checking it");
-                }
+            if m.method == "ok" && m.args.is_empty() && !on_write_macro && !fire_and_forget {
+                self.report(m.method.span(), "`.ok();` silences the Result without checking it");
             }
         }
         visit::visit_stmt(self, s);
@@ -172,7 +173,9 @@ fn strip_propagation(mut e: &Expr) -> &Expr {
         e = match peel(e) {
             Expr::Try(t) => &t.expr,
             Expr::Await(a) => &a.base,
-            Expr::MethodCall(m) if (m.method == "unwrap" && m.args.is_empty()) || (m.method == "expect" && m.args.len() == 1) => {
+            Expr::MethodCall(m)
+                if (m.method == "unwrap" && m.args.is_empty()) || (m.method == "expect" && m.args.len() == 1) =>
+            {
                 &m.receiver
             }
             other => return other,
@@ -252,10 +255,10 @@ impl Rule for UnusedIoAmount {
                         }
                     }
                     Stmt::Local(l) if matches!(l.pat, Pat::Wild(_)) => {
-                        if let Some(init) = &l.init {
-                            if let Some(m) = io_call(&init.expr) {
-                                self.flag(m);
-                            }
+                        if let Some(init) = &l.init
+                            && let Some(m) = io_call(&init.expr)
+                        {
+                            self.flag(m);
                         }
                     }
                     _ => {}
@@ -296,13 +299,14 @@ impl Rule for UnitErrorType {
                     .iter()
                     .filter_map(|a| if let syn::GenericArgument::Type(t) = a { Some(t) } else { None })
                     .collect();
-                if let [_, syn::Type::Tuple(t)] = types.as_slice() {
-                    if t.elems.is_empty() && self.ctx.is_production_line(sig.ident.span().start().line) {
-                        self.sink.emit_span(
-                            sig.ident.span(),
-                            format!("`{}` returns `Result<_, ()>`; use an error type that says what failed", sig.ident),
-                        );
-                    }
+                if let [_, syn::Type::Tuple(t)] = types.as_slice()
+                    && t.elems.is_empty()
+                    && self.ctx.is_production_line(sig.ident.span().start().line)
+                {
+                    self.sink.emit_span(
+                        sig.ident.span(),
+                        format!("`{}` returns `Result<_, ()>`; use an error type that says what failed", sig.ident),
+                    );
                 }
             }
         }

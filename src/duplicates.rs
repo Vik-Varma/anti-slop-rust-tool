@@ -19,14 +19,14 @@ use std::str::FromStr;
 pub static META: RuleMeta = RuleMeta {
     id: "duplicate-code",
     category: Category::Maintainability,
-    severity: Severity::Warning,
-    evidence: Evidence::Moderate,
-    default_enabled: true,
+    severity: Severity::Info,
+    evidence: Evidence::Weak,
+    default_enabled: false,
     summary: "Long block of code duplicated elsewhere in the project",
     rationale: "Copy-pasted code must be changed consistently; when a fix is applied to one copy \
 and not the others, the bug survives. Juergens et al. (ICSE 2009) found that inconsistently \
 changed clones contained faults in practice. Not all duplication is harmful (Kapser & Godfrey, \
-2008), so only long runs of identical tokens are reported.",
+2008), so only long runs of identical tokens are reported. Not verified: in our mining, duplicated functions were if anything less often bug-fixed than others of the same size (OR 0.67, 95% CI 0.50-0.88, Holm p = 0.052), consistent with Rahman et al. 2012.",
     sources: &[
         "Juergens, Deissenboeck, Hummel, Wagner. Do code clones matter? ICSE 2009, pp. 485-495. arXiv:1701.05472",
         "Rahman, Bird, Devanbu. Clones: what is that smell? EMSE 17, 2012 (found clones not more bug-prone).",
@@ -87,15 +87,13 @@ fn flatten(ts: TokenStream, out: &mut Vec<Tok>) {
             }
             TokenTree::Punct(p) => {
                 // Skip `#[doc = "..."]` attributes produced by doc comments.
-                if p.as_char() == '#' {
-                    if let Some(TokenTree::Group(g)) = iter.peek() {
-                        if g.delimiter() == Delimiter::Bracket
-                            && g.stream().into_iter().next().is_some_and(|t| t.to_string() == "doc")
-                        {
-                            iter.next();
-                            continue;
-                        }
-                    }
+                if p.as_char() == '#'
+                    && let Some(TokenTree::Group(g)) = iter.peek()
+                    && g.delimiter() == Delimiter::Bracket
+                    && g.stream().into_iter().next().is_some_and(|t| t.to_string() == "doc")
+                {
+                    iter.next();
+                    continue;
                 }
                 out.push(Tok { hash: hash_str(&p.as_char().to_string()), line });
             }

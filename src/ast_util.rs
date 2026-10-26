@@ -100,12 +100,12 @@ impl Imports {
     /// Full path of `path` as segments, expanding a leading imported name.
     pub fn resolve(&self, path: &syn::Path) -> Vec<String> {
         let segs: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
-        if let Some(first) = segs.first() {
-            if let Some(full) = self.map.get(first) {
-                let mut out = full.clone();
-                out.extend(segs[1..].iter().cloned());
-                return out;
-            }
+        if let Some(first) = segs.first()
+            && let Some(full) = self.map.get(first)
+        {
+            let mut out = full.clone();
+            out.extend(segs[1..].iter().cloned());
+            return out;
         }
         segs
     }

@@ -26,10 +26,7 @@ pub fn discover(paths: &[PathBuf]) -> Vec<PathBuf> {
             files.push(root.clone());
             continue;
         }
-        let walker = ignore::WalkBuilder::new(root)
-            .hidden(true)
-            .filter_entry(|e| e.file_name() != "target")
-            .build();
+        let walker = ignore::WalkBuilder::new(root).hidden(true).filter_entry(|e| e.file_name() != "target").build();
         for entry in walker.flatten() {
             let p = entry.path();
             if p.is_file() && p.extension().is_some_and(|e| e == "rs") {
@@ -49,10 +46,10 @@ pub fn crate_relative(path: &Path) -> PathBuf {
     let abs = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     let mut dir = abs.parent();
     while let Some(d) = dir {
-        if d.join("Cargo.toml").is_file() {
-            if let Ok(rel) = abs.strip_prefix(d) {
-                return rel.to_path_buf();
-            }
+        if d.join("Cargo.toml").is_file()
+            && let Ok(rel) = abs.strip_prefix(d)
+        {
+            return rel.to_path_buf();
         }
         dir = d.parent();
     }
@@ -61,12 +58,12 @@ pub fn crate_relative(path: &Path) -> PathBuf {
 
 pub fn analyze_source(
     path: &Path,
-    display: PathBuf,
     kind: FileKind,
     source: &str,
     config: &Config,
     rules: &[Box<dyn Rule>],
 ) -> FileReport {
+    let display = path.to_path_buf();
     let ctx = match FileContext::with_kind(path, display.clone(), kind, source) {
         Ok(ctx) => ctx,
         Err(e) => {
@@ -90,18 +87,20 @@ pub fn analyze_source(
         findings.append(&mut sink.findings);
     }
     findings.sort_by_key(|f| (f.line, f.column, f.rule));
-    let tokens = if config.rule_enabled(&crate::duplicates::META) {
-        crate::duplicates::tokens(&ctx)
-    } else {
-        Vec::new()
-    };
+    let tokens =
+        if config.rule_enabled(&crate::duplicates::META) { crate::duplicates::tokens(&ctx) } else { Vec::new() };
     FileReport { file: display, findings, functions: fns, parse_error: None, kind: Some(kind), tokens }
 }
 
 /// Analyses `files`. `roots` are the paths the user asked to check; a file's
 /// location relative to them (e.g. `examples/foo/src/lib.rs`) also informs
 /// its classification.
-pub fn analyze_files(files: &[PathBuf], roots: &[PathBuf], config: &Config, rules: &[Box<dyn Rule>]) -> Vec<FileReport> {
+pub fn analyze_files(
+    files: &[PathBuf],
+    roots: &[PathBuf],
+    config: &Config,
+    rules: &[Box<dyn Rule>],
+) -> Vec<FileReport> {
     let layout = crate::modtree::compute(files);
     let mut reports: Vec<FileReport> = files
         .par_iter()
@@ -113,7 +112,7 @@ pub fn analyze_files(files: &[PathBuf], roots: &[PathBuf], config: &Config, rule
                 _ => layout.classify(path),
             };
             match std::fs::read_to_string(path) {
-                Ok(src) => analyze_source(path, path.clone(), kind, &src, config, rules),
+                Ok(src) => analyze_source(path, kind, &src, config, rules),
                 Err(e) => FileReport {
                     file: path.clone(),
                     parse_error: Some(format!("cannot read: {e}")),

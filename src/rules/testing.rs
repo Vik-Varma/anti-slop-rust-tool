@@ -4,7 +4,7 @@ use crate::analyze::analyze_source;
 use crate::config::Config;
 use crate::context::FileKind;
 use crate::finding::Finding;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Runs a single rule on `src` as if it were `src/lib.rs`.
 pub fn check_rule(id: &str, src: &str) -> Vec<Finding> {
@@ -16,7 +16,7 @@ pub fn check_rule_at(id: &str, path: &str, src: &str) -> Vec<Finding> {
     let rule = super::find(id).unwrap_or_else(|| panic!("no rule {id}"));
     let config = Config { only: vec![id.to_string()], ..Config::default() };
     let kind = FileKind::from_path(Path::new(path));
-    let report = analyze_source(Path::new(path), PathBuf::from(path), kind, src, &config, &[rule]);
+    let report = analyze_source(Path::new(path), kind, src, &config, &[rule]);
     assert!(report.parse_error.is_none(), "parse error: {:?}", report.parse_error);
     report.findings
 }

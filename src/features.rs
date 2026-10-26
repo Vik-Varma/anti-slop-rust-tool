@@ -25,18 +25,30 @@ pub struct Features {
     pub comment_lines: usize,
 }
 
-pub fn count(sig: &syn::Signature, block: &syn::Block, lines: &[&str], start: usize, end: usize) -> Features {
-    let mut f = Features::default();
-    f.bool_params = sig
+pub fn count(
+    sig: &syn::Signature,
+    block: &syn::Block,
+    lines: &[&str],
+    start: usize,
+    end: usize,
+) -> Features {
+    let bool_params = sig
         .inputs
         .iter()
         .filter(|a| matches!(a, syn::FnArg::Typed(t) if matches!(t.ty.as_ref(), syn::Type::Path(p) if p.path.is_ident("bool"))))
         .count();
+    let mut f = Features {
+        bool_params,
+        ..Features::default()
+    };
     for line in lines.iter().take(end).skip(start.saturating_sub(1)) {
         let Some(at) = line.find("//") else { continue };
         f.comment_lines += 1;
         let c = &line[at..];
-        if ["TODO", "FIXME", "HACK", "XXX"].iter().any(|m| c.contains(m)) {
+        if ["TODO", "FIXME", "HACK", "XXX"]
+            .iter()
+            .any(|m| c.contains(m))
+        {
             f.debt_comments += 1;
         }
     }
@@ -70,7 +82,10 @@ impl<'ast> Visit<'ast> for Counter<'_> {
     fn visit_lit(&mut self, node: &'ast syn::Lit) {
         let magic = match node {
             syn::Lit::Int(i) => !matches!(i.base10_digits(), "0" | "1" | "2"),
-            syn::Lit::Float(f) => !matches!(f.base10_digits(), "0.0" | "1.0" | "0" | "1" | "2" | "2.0" | "0.5"),
+            syn::Lit::Float(f) => !matches!(
+                f.base10_digits(),
+                "0.0" | "1.0" | "0" | "1" | "2" | "2.0" | "0.5"
+            ),
             _ => false,
         };
         if magic {
@@ -82,7 +97,13 @@ impl<'ast> Visit<'ast> for Counter<'_> {
         let name = crate::checks::macro_name(node);
         if matches!(
             name.as_str(),
-            "panic" | "unreachable" | "assert" | "assert_eq" | "assert_ne" | "todo" | "unimplemented"
+            "panic"
+                | "unreachable"
+                | "assert"
+                | "assert_eq"
+                | "assert_ne"
+                | "todo"
+                | "unimplemented"
         ) {
             self.0.panics += 1;
         }

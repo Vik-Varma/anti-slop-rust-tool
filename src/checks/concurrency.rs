@@ -6,7 +6,8 @@ use super::{call_path, path_ends_with, peel};
 use crate::analyzer::Analyzer;
 
 pub fn call(a: &mut Analyzer, node: &syn::ExprCall) {
-    if !a.scope().in_async {
+    // Tests sleep on purpose (to let a timer expire, to simulate a stalled peer).
+    if !a.scope().in_async || a.scope().test {
         return;
     }
     let Some(path) = call_path(node) else { return };

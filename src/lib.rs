@@ -10,12 +10,13 @@ mod checks;
 mod context;
 mod features;
 mod finding;
+mod layout;
 pub mod metrics;
 pub mod rules;
 mod suppress;
 mod walk;
 
-pub use analyzer::{FileReport, analyze_source};
+pub use analyzer::{FileReport, analyze_source, analyze_source_as};
 pub use context::FileKind;
 pub use features::Features;
 pub use finding::{Finding, Severity};

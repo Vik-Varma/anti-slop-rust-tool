@@ -17,7 +17,8 @@ USAGE:
 
 OPTIONS:
     --format text|json        output format (default text)
-    --min-severity LEVEL      note, warning or error (default note)
+    --min-severity LEVEL      note, warning or error (default warning; notes are
+                              real but usually deliberate, see `anti-slop rules`)
     --only RULE[,RULE]        run only these rules
     --skip RULE[,RULE]        don't report these rules
 
@@ -34,7 +35,7 @@ struct Options {
 fn parse_options(args: &[String]) -> Result<Options, String> {
     let mut o = Options {
         format: "text".into(),
-        min_severity: Severity::Note,
+        min_severity: Severity::Warning,
         only: vec![],
         skip: vec![],
         paths: vec![],
@@ -108,13 +109,15 @@ fn explain(id: Option<&String>) -> Result<ExitCode, String> {
     let id = id.ok_or("explain needs a rule id")?;
     let r = rules::get(id).ok_or(format!("unknown rule `{id}`"))?;
     let mut text = format!(
-        "{} ({}, {})\n\n{}\n\nWhy it is bad: {}\n\nWhat it can get wrong: {}\n\nSources:\n",
+        "{} ({}, {}, evidence: {})\n\n{}\n\nWhy it is bad: {}\n\nWhat it can get wrong: {}\n\nAudit: {}\n\nSources:\n",
         r.id,
         r.severity,
         r.category.as_str(),
+        r.evidence.as_str(),
         r.summary,
         r.harm,
-        r.false_positives
+        r.false_positives,
+        r.precision
     );
     for s in r.sources {
         text.push_str(&format!("  - {s}\n"));
@@ -272,8 +275,16 @@ fn metrics(o: &Options) -> Result<ExitCode, String> {
                     let values: Vec<&str> = row.iter().map(|(_, v)| v.as_str()).collect();
                     writeln!(out, "{}", values.join(","))?;
                 } else {
-                    let fields: Vec<String> = row.iter().map(|(k, v)| format!("{}: {v}", json_str(k))).collect();
-                    write!(out, "{}  {{{}}}", if first { "" } else { ",\n" }, fields.join(", "))?;
+                    let fields: Vec<String> = row
+                        .iter()
+                        .map(|(k, v)| format!("{}: {v}", json_str(k)))
+                        .collect();
+                    write!(
+                        out,
+                        "{}  {{{}}}",
+                        if first { "" } else { ",\n" },
+                        fields.join(", ")
+                    )?;
                 }
                 first = false;
             }
@@ -287,5 +298,9 @@ fn metrics(o: &Options) -> Result<ExitCode, String> {
     for e in &errors {
         eprintln!("anti-slop: {e}");
     }
-    Ok(if errors.is_empty() { ExitCode::SUCCESS } else { ExitCode::from(2) })
+    Ok(if errors.is_empty() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(2)
+    })
 }

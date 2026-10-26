@@ -6,7 +6,12 @@ use std::path::Path;
 use anti_slop::analyze_source;
 
 fn check_at(path: &str, src: &str) {
-    let report = analyze_source(Path::new(path), src).expect("fixture parses");
+    // The markers are comments, which some rules read, so analyse the source without them.
+    let unmarked: Vec<&str> = src
+        .lines()
+        .map(|l| l.split("//~").next().unwrap_or(l))
+        .collect();
+    let report = analyze_source(Path::new(path), &unmarked.join("\n")).expect("fixture parses");
     let mut expected: Vec<(usize, String)> = Vec::new();
     for (i, line) in src.lines().enumerate() {
         if let Some((_, rules)) = line.split_once("//~") {
@@ -58,6 +63,10 @@ fn unwrap_is_fine_outside_shipping_code() {
     check_at("tests/it.rs", src);
     check_at("examples/demo.rs", src);
     check_at("build.rs", src);
+    check_at("crates/cargo-test-support/src/lib.rs", src);
+    check_at("benchmarks/src/routing.rs", src);
+    check_at("xtask/src/main.rs", src);
+    check_at("src/test_utils.rs", src);
 }
 
 #[test]
@@ -75,7 +84,7 @@ fn todo_and_dbg() {
     check(
         r#"
         fn a() -> u8 { todo!() } //~ todo
-        fn b() -> u8 { unimplemented!("later") } //~ todo
+        fn b() -> u8 { unimplemented!("not supported on this backend") }
         fn c(x: u8) -> u8 { dbg!(x) } //~ dbg-macro
         fn d() { let v = vec![dbg!(1), 2]; } //~ dbg-macro
         fn e() -> u8 { unreachable!() }
@@ -128,7 +137,7 @@ fn unsafe_needs_a_safety_comment() {
     check(
         r#"
         fn a(p: *const u8) -> u8 {
-            unsafe { *p } //~ unsafe-without-safety-comment
+            unsafe { *p } //~ unsafe-without-comment
         }
         fn b(p: *const u8) -> u8 {
             // SAFETY: the caller passes a pointer from `Box::into_raw`.
@@ -151,19 +160,9 @@ fn unsafe_needs_a_safety_comment() {
             }
         }
         struct S(*mut u8);
-        unsafe impl Send for S {} //~ unsafe-without-safety-comment
+        unsafe impl Send for S {} //~ unsafe-without-comment
         // SAFETY: S owns its pointer exclusively.
         unsafe impl Sync for S {}
-        "#,
-    );
-}
-
-#[test]
-fn mem_forget() {
-    check(
-        r#"
-        fn a(f: std::fs::File) { std::mem::forget(f); } //~ mem-forget
-        fn b(f: std::fs::File) { let _f = std::mem::ManuallyDrop::new(f); }
         "#,
     );
 }
@@ -241,30 +240,11 @@ fn ignored_io_errors() {
             let _ = std::fs::rename("a", "b"); //~ ignored-io-error
             let _ = std::fs::remove_file("tmp");
             let _ = tx_send();
+            let _ = std::io::stdout().flush();
+            let _ = stderr.write_all(b);
             f.write_all(b).expect("disk full is fatal here");
         }
         fn tx_send() -> Result<(), ()> { Ok(()) }
-        "#,
-    );
-}
-
-#[test]
-fn unused_io_amount() {
-    check(
-        r#"
-        use std::io::{Read, Write};
-        fn a(w: &mut impl Write, r: &mut impl Read, buf: &mut [u8]) -> std::io::Result<()> {
-            w.write(buf)?; //~ unused-io-amount
-            r.read(buf)?; //~ unused-io-amount
-            let _ = w.write(buf); //~ unused-io-amount
-            let n = w.write(buf)?;
-            w.write_all(buf)?;
-            r.read_exact(buf)?;
-            Ok(())
-        }
-        struct Log;
-        impl Log { fn write(&mut self, _: u8) {} }
-        fn b(l: &mut Log) { l.write(1); }
         "#,
     );
 }
@@ -304,6 +284,7 @@ fn len_truncating_cast() {
 
 #[test]
 fn deny_warnings() {
+    check_at("examples/demo.rs", "#![deny(warnings)]\nfn main() {}");
     check("#![deny(warnings)] //~ deny-warnings\nfn a() {}");
     check("#![forbid(unsafe_code, warnings)] //~ deny-warnings\nfn a() {}");
     check("#![deny(missing_docs)]\nfn a() {}");
@@ -333,4 +314,133 @@ fn function_names_are_qualified() {
 #[test]
 fn unparseable_files_are_errors_not_clean() {
     assert!(analyze_source(Path::new("src/lib.rs"), "fn (").is_err());
+}
+
+#[test]
+fn cargo_script_frontmatter() {
+    check(
+        "#!/usr/bin/env cargo\n---\n[package]\nedition = \"2024\"\n---\nfn main() { dbg!(1); } //~ dbg-macro\nfn f() { todo!() } //~ todo",
+    );
+}
+
+#[test]
+fn panic_on_input() {
+    check(
+        r#"
+        fn a(s: &str) -> u16 { s.parse().unwrap() } //~ panic-on-input
+        fn b(s: &str) -> u16 { s.parse().expect("validated by the CLI parser") }
+        fn c() -> std::fs::File { std::fs::File::open(path()).unwrap() } //~ panic-on-input
+        fn d(p: &std::path::Path) -> &str { p.to_str().unwrap() } //~ panic-on-input
+        fn e(k: &str) -> String { std::env::var(k).unwrap() } //~ panic-on-input
+        fn f(b: Vec<u8>) -> String { String::from_utf8(b).unwrap() } //~ panic-on-input
+        fn g() -> std::process::Output { std::process::Command::new("git").arg("log").output().unwrap() } //~ panic-on-input
+        fn h() -> std::net::IpAddr { "127.0.0.1".parse().unwrap() }
+        fn i(x: Option<u8>) -> u8 { x.expect("checked by the caller") }
+        fn j(s: &mut String) { use std::fmt::Write; write!(s, "{}", 1).unwrap(); }
+        fn k(o: &Opener) { o.open().unwrap(); } //~ unwrap
+        "#,
+    );
+}
+
+fn temp_crate(name: &str, files: &[(&str, &str)]) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("anti-slop-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    for (path, body) in files {
+        let p = dir.join(path);
+        std::fs::create_dir_all(p.parent().expect("has a parent")).expect("temp dir");
+        std::fs::write(p, body).expect("write");
+    }
+    dir
+}
+
+fn findings_in(dir: &std::path::Path) -> Vec<String> {
+    let (reports, errors) = anti_slop::analyze_paths(&[dir.to_path_buf()]);
+    assert!(errors.is_empty(), "{errors:?}");
+    reports
+        .iter()
+        .flat_map(|(_, r)| &r.findings)
+        .map(|f| {
+            format!(
+                "{}:{}",
+                f.path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or_default(),
+                f.rule
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn files_under_a_cfg_test_module_are_tests() {
+    let dir = temp_crate(
+        "layout",
+        &[
+            ("Cargo.toml", "[package]\nname = \"x\"\n"),
+            (
+                "src/lib.rs",
+                "#[cfg(test)]\nmod unit;\nfn a(x: Option<u8>) -> u8 { x.unwrap() }\n",
+            ),
+            (
+                "src/unit/mod.rs",
+                "mod mocks;\nfn b(x: Option<u8>) -> u8 { x.unwrap() }\n",
+            ),
+            ("src/unit/mocks.rs", "fn c() -> u8 { todo!() }\n"),
+        ],
+    );
+    assert_eq!(findings_in(&dir), ["lib.rs:unwrap"]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn binary_crate_modules_may_exit() {
+    let bin = temp_crate(
+        "bin",
+        &[
+            ("Cargo.toml", "[package]\nname = \"x\"\n"),
+            ("src/main.rs", "mod cli;\nfn main() {}\n"),
+            (
+                "src/cli.rs",
+                "pub fn fail() -> ! { std::process::exit(1) }\n",
+            ),
+        ],
+    );
+    assert!(findings_in(&bin).is_empty());
+    let lib = temp_crate(
+        "lib",
+        &[
+            ("Cargo.toml", "[package]\nname = \"x\"\n"),
+            (
+                "src/lib.rs",
+                "pub fn fail() -> ! { std::process::exit(1) }\n",
+            ),
+        ],
+    );
+    assert_eq!(findings_in(&lib), ["lib.rs:process-exit-in-library"]);
+    let _ = std::fs::remove_dir_all(&bin);
+    let _ = std::fs::remove_dir_all(&lib);
+}
+
+#[test]
+fn blocking_sleep_in_async_tests_is_deliberate() {
+    check(
+        r#"
+        #[tokio::test]
+        async fn waits_for_expiry() { std::thread::sleep(std::time::Duration::from_secs(1)); }
+        "#,
+    );
+}
+
+#[test]
+fn a_checkout_inside_a_tests_directory_is_still_shipping_code() {
+    let dir = temp_crate(
+        "tests/checkout",
+        &[
+            ("Cargo.toml", "[package]\nname = \"x\"\n"),
+            ("src/lib.rs", "fn a() -> u8 { todo!() }\n"),
+        ],
+    );
+    assert_eq!(findings_in(&dir), ["lib.rs:todo"]);
+    let _ = std::fs::remove_dir_all(&dir);
 }

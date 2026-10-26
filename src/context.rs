@@ -15,13 +15,14 @@ pub enum FileKind {
 impl FileKind {
     pub fn of(path: &Path) -> FileKind {
         let parts: Vec<&str> = path.iter().filter_map(|p| p.to_str()).collect();
-        let has = |name: &str| parts.contains(&name);
         let file = parts.last().copied().unwrap_or_default();
+        let stem = file.strip_suffix(".rs").unwrap_or(file);
+        let dirs = &parts[..parts.len().saturating_sub(1)];
         if file == "build.rs" {
             FileKind::BuildScript
-        } else if has("tests") || has("benches") {
+        } else if dirs.iter().any(|d| is_test_dir(d)) || TEST_FILE_STEMS.contains(&stem) {
             FileKind::Test
-        } else if has("examples") {
+        } else if dirs.contains(&"examples") {
             FileKind::Example
         } else if file == "main.rs" || parts.windows(2).any(|w| w[0] == "src" && w[1] == "bin") {
             FileKind::Binary
@@ -34,6 +35,41 @@ impl FileKind {
     pub fn ships(self) -> bool {
         matches!(self, FileKind::Library | FileKind::Binary)
     }
+}
+
+/// Directories of code that only runs in development: tests, test-support crates, benchmarks,
+/// fuzz targets and `xtask` build helpers.
+const TEST_DIRS: &[&str] = &[
+    "tests",
+    "test",
+    "testing",
+    "benches",
+    "bench",
+    "benchmarks",
+    "fuzz",
+    "xtask",
+];
+const TEST_DIR_SUFFIXES: &[&str] = &[
+    "-test",
+    "-tests",
+    "_test",
+    "_tests",
+    "-test-support",
+    "-testing",
+    "-bench",
+    "-fuzz",
+];
+const TEST_FILE_STEMS: &[&str] = &[
+    "test",
+    "tests",
+    "test_utils",
+    "test_helpers",
+    "testing",
+    "test_support",
+];
+
+fn is_test_dir(d: &str) -> bool {
+    TEST_DIRS.contains(&d) || TEST_DIR_SUFFIXES.iter().any(|s| d.ends_with(s))
 }
 
 /// Where the visitor is right now. Pushed on entering a function, closure, block or module.

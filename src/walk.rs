@@ -3,7 +3,9 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::analyzer::{FileReport, analyze_source};
+use crate::analyzer::{FileReport, analyze_source_as};
+use crate::context::FileKind;
+use crate::layout;
 
 /// Directories that hold build output, dependencies or VCS data, never the code under review.
 const SKIP_DIRS: &[&str] = &["target", ".git", "node_modules", "vendor", ".cargo"];
@@ -75,9 +77,21 @@ pub fn analyze_paths(paths: &[PathBuf]) -> (Vec<(PathBuf, FileReport)>, Vec<Anal
                 continue;
             }
         };
+        // Judge paths from the root's own name down: `anti-slop tests` and `anti-slop tests/a.rs`
+        // see `tests/`, but a checkout that lives inside some `tests/` directory doesn't.
+        let base = if root.is_file() {
+            Path::new("")
+        } else {
+            root.parent().unwrap_or(Path::new(""))
+        };
+        let kinds = layout::kinds(base, &files);
         for file in files {
+            let kind = kinds
+                .get(&file)
+                .copied()
+                .unwrap_or_else(|| FileKind::of(&file));
             match fs::read_to_string(&file) {
-                Ok(src) => match analyze_source(&file, &src) {
+                Ok(src) => match analyze_source_as(&file, &src, kind) {
                     Ok(report) => reports.push((file, report)),
                     Err(e) => errors.push(AnalyzeError::Parse(file, e)),
                 },

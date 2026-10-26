@@ -11,7 +11,7 @@ pub enum Category {
     ErrorHandling,
     /// Deadlocks and stalls.
     Concurrency,
-    /// Code that measurably costs more to change safely.
+    /// Code that breaks other people's builds.
     Maintainability,
 }
 
@@ -22,6 +22,25 @@ impl Category {
             Category::ErrorHandling => "error-handling",
             Category::Concurrency => "concurrency",
             Category::Maintainability => "maintainability",
+        }
+    }
+}
+
+/// How the claim behind a rule was established (docs/DEFINITION.md).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Evidence {
+    /// The failure was reproduced in `experiments/`, and an authoritative source describes it.
+    Demonstrated,
+    /// Authoritative sources agree on it, but it is a review practice: there is no failure to
+    /// reproduce, and the defect study found no measurable effect either way.
+    Consensus,
+}
+
+impl Evidence {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Evidence::Demonstrated => "demonstrated",
+            Evidence::Consensus => "consensus",
         }
     }
 }
@@ -37,6 +56,9 @@ pub struct Rule {
     pub harm: &'static str,
     /// What the check can get wrong without type information.
     pub false_positives: &'static str,
+    pub evidence: Evidence,
+    /// Hand-checked findings from the corpus audit that were what the rule says they are.
+    pub precision: &'static str,
     pub sources: &'static [&'static str],
 }
 
@@ -49,68 +71,95 @@ pub fn get(id: &str) -> Option<&'static Rule> {
 }
 
 const BOOK_PANIC: &str = "Rust Book ch. 9.3, To panic! or Not to panic!: https://doc.rust-lang.org/book/ch09-03-to-panic-or-not-to-panic.html";
+const API_DTOR: &str = "Rust API Guidelines C-DTOR-FAIL, destructors never fail: https://rust-lang.github.io/api-guidelines/dependability.html#c-dtor-fail";
 
 static RULES: &[Rule] = &[
     Rule {
-        id: "unwrap",
+        id: "panic-on-input",
         category: Category::Correctness,
         severity: Severity::Warning,
-        summary: "`.unwrap()` in shipping code",
-        harm: "A failed unwrap kills the thread (and with it often the process) with a message that names \
-               no cause: \"called `Option::unwrap()` on a `None` value\". A panic while holding a lock \
-               poisons it for every other thread. The Rust Book reserves unwrap for tests, prototypes and \
-               cases the compiler can't see, and says production code should prefer `expect` with the \
-               reason. Cloudflare's 18 November 2025 global outage was an unwrap on an error.",
-        false_positives: "Can't see an earlier `is_some()` check or other proof that the value is present. \
-                          Not flagged: tests, examples, build scripts, `const` code, `lock().unwrap()` \
-                          (poison propagation, as the std docs do it) and unwraps on literals such as \
-                          `\"127.0.0.1\".parse().unwrap()`, which fail on the first run.",
+        summary: "`.unwrap()`/`.expect()` on parsing, decoding, file, env or socket results",
+        harm: "These fail because of something outside the program: a malformed file, a missing \
+               variable, a non-UTF-8 path, a refused connection. Unwrapping turns that into a crash \
+               instead of an error the caller can report. Cloudflare's 18 November 2025 outage was an \
+               unwrap on the result of loading a generated feature file that had grown past a limit.",
+        false_positives: "Input the program wrote itself moments before, or that a previous step validated.",
+        evidence: Evidence::Demonstrated,
+        precision: "PENDING",
         sources: &[
             BOOK_PANIC,
             "Cloudflare, 18 November 2025 outage: https://blog.cloudflare.com/18-november-2025-outage/",
-            "Clippy unwrap_used: https://rust-lang.github.io/rust-clippy/master/index.html#unwrap_used",
             "experiments/tests/panics.rs: unwrap_panics_without_context, a_panic_poisons_shared_state",
+        ],
+    },
+    Rule {
+        id: "unwrap",
+        category: Category::Correctness,
+        severity: Severity::Note,
+        summary: "Any other `.unwrap()` in shipping code",
+        harm: "A failed unwrap panics with a message that names no cause (\"called `Option::unwrap()` \
+               on a `None` value\"), and a panic while a lock is held poisons it for every thread. The \
+               Rust Book accepts unwrap where the code knows more than the compiler, and asks for \
+               `expect` with the reason in production code. Most unwraps in the audit were such \
+               invariants, and the defect study found unwraps don't mark fix-prone functions, so this \
+               is a note, not a warning.",
+        false_positives: "An invariant the reader can see. Not flagged: tests, examples, build scripts, `const` \
+                          code, `lock().unwrap()`, unwraps of literals and of `write!` (formatting into a \
+                          `String` can't fail).",
+        evidence: Evidence::Demonstrated,
+        precision: "PENDING",
+        sources: &[
+            BOOK_PANIC,
+            "Clippy unwrap_used (restriction): https://rust-lang.github.io/rust-clippy/master/index.html#unwrap_used",
+            "study/results.md, study/replication.md: H7",
         ],
     },
     Rule {
         id: "todo",
         category: Category::Correctness,
         severity: Severity::Warning,
-        summary: "`todo!()` or `unimplemented!()` in shipping code",
-        harm: "Both type-check as any type, so unfinished code compiles and ships, then panics with \"not yet \
-               implemented\" when the path is reached.",
-        false_positives: "None for the panic itself. `unimplemented!` is sometimes a deliberate \"unsupported\" \
-                          answer; returning an error says that without crashing.",
+        summary: "`todo!()` in shipping code",
+        harm: "It type-checks as any type, so unfinished code compiles and ships, then panics with \"not \
+               yet implemented\" when the path is reached. `unimplemented!()` isn't flagged: the std \
+               docs define it as a statement that the code won't be implemented, and the audit found it \
+               used that way (unsupported backend features, mocks).",
+        false_positives: "None for the panic itself.",
+        evidence: Evidence::Demonstrated,
+        precision: "PENDING",
         sources: &[
             "std::todo: https://doc.rust-lang.org/std/macro.todo.html",
-            "Clippy todo / unimplemented: https://rust-lang.github.io/rust-clippy/master/index.html#todo",
             "experiments/tests/panics.rs: todo_compiles_and_panics_at_runtime",
         ],
     },
     Rule {
         id: "dbg-macro",
         category: Category::Correctness,
-        severity: Severity::Warning,
-        summary: "`dbg!` left in shipping code",
-        harm: "`dbg!` is a debugging aid that behaves the same in release builds: it writes file, line and \
-               value to stderr, which leaks internals and pollutes output that tools parse.",
-        false_positives: "None; it is never needed in shipped code.",
+        severity: Severity::Note,
+        summary: "`dbg!` in shipping code",
+        harm: "`dbg!` behaves the same in release builds: it writes file, line and value to stderr. Left \
+               in by accident, that leaks internals into output that tools parse. The audit found it \
+               mostly used on purpose, behind a debug flag, so this is a note.",
+        false_positives: "Deliberate debug output, e.g. gated on an environment variable.",
+        evidence: Evidence::Demonstrated,
+        precision: "PENDING",
         sources: &[
             "std::dbg: https://doc.rust-lang.org/std/macro.dbg.html",
-            "Clippy dbg_macro: https://rust-lang.github.io/rust-clippy/master/index.html#dbg_macro",
+            "Clippy dbg_macro (restriction): https://rust-lang.github.io/rust-clippy/master/index.html#dbg_macro",
         ],
     },
     Rule {
         id: "panic-in-drop",
         category: Category::Correctness,
-        severity: Severity::Error,
+        severity: Severity::Warning,
         summary: "A panic (`unwrap`, `expect`, `panic!`, `assert!`) inside `Drop::drop`",
         harm: "Destructors run during unwinding. A panic in one while another panic unwinds aborts the whole \
                process: `catch_unwind` never gets control and no other destructor runs. Verified: SIGABRT \
                with \"panic in a destructor during cleanup\".",
-        false_positives: "An assertion that truly can't fail. Rudra (SOSP '21) found panic-safety bugs in real \
-                          crates of exactly this shape.",
+        false_positives: "An assertion of an internal invariant that only fails if the program is already broken.",
+        evidence: Evidence::Demonstrated,
+        precision: "PENDING",
         sources: &[
+            API_DTOR,
             "std::ops::Drop, panics: https://doc.rust-lang.org/std/ops/trait.Drop.html",
             "experiments/tests/panics.rs: panic_in_drop_during_unwind_aborts",
         ],
@@ -118,13 +167,15 @@ static RULES: &[Rule] = &[
     Rule {
         id: "static-mut",
         category: Category::Correctness,
-        severity: Severity::Error,
+        severity: Severity::Warning,
         summary: "A `static mut` item",
         harm: "Every access is unsafe and nothing stops two threads, or two references, touching it at once: \
                a data race, which is undefined behaviour. Miri reports a data race on a two-thread counter. \
                Rust 2024 makes references to it a hard error (`static_mut_refs`).",
-        false_positives: "Single-threaded embedded code that only uses raw pointers to it; an atomic, `Mutex`, \
-                          `OnceLock` or a cell type still says that in the type.",
+        false_positives: "FFI tables a C library writes to (Python module definitions); a cell type or \
+                          `&raw mut` access still says that in the code.",
+        evidence: Evidence::Demonstrated,
+        precision: "PENDING",
         sources: &[
             "Edition Guide, static mut references: https://doc.rust-lang.org/edition-guide/rust-2024/static-mut-references.html",
             "experiments/miri: bad_static_mut_race (UB) vs good_atomic_counter (clean)",
@@ -140,39 +191,30 @@ static RULES: &[Rule] = &[
                reference.",
         false_positives: "`MaybeUninit::<[MaybeUninit<T>; N]>::uninit().assume_init()`, the documented sound \
                           form, isn't flagged.",
+        evidence: Evidence::Demonstrated,
+        precision: "no instances in the corpus",
         sources: &[
             "std::mem::uninitialized: https://doc.rust-lang.org/std/mem/fn.uninitialized.html",
             "std::mem::MaybeUninit, initialization invariant: https://doc.rust-lang.org/std/mem/union.MaybeUninit.html",
-            "Clippy uninit_assumed_init (correctness): https://rust-lang.github.io/rust-clippy/master/index.html#uninit_assumed_init",
             "experiments/miri: bad_assume_init, bad_mem_uninitialized; experiments/tests/memory.rs",
         ],
     },
     Rule {
-        id: "unsafe-without-safety-comment",
-        category: Category::Correctness,
-        severity: Severity::Warning,
-        summary: "An `unsafe` block or `unsafe impl` with no `// SAFETY:` comment",
-        harm: "`unsafe` moves the proof obligation from the compiler to the author. Without the written \
-               argument, a reviewer can't check it and a later edit can silently break it. Memory-safety \
-               bugs in Rust CVEs come from unsafe code.",
-        false_positives: "A justification written in a different style (e.g. `// Sound because ...`).",
-        sources: &[
-            "Clippy undocumented_unsafe_blocks: https://rust-lang.github.io/rust-clippy/master/index.html#undocumented_unsafe_blocks",
-            "Standard library dev guide, safety comments: https://std-dev-guide.rust-lang.org/policy/safety-comments.html",
-        ],
-    },
-    Rule {
-        id: "mem-forget",
+        id: "unsafe-without-comment",
         category: Category::Correctness,
         severity: Severity::Note,
-        summary: "`mem::forget(x)`",
-        harm: "Skips the destructor: a forgotten `MutexGuard` keeps the lock forever, a forgotten `File` leaks \
-               its descriptor (both verified). It is safe, so the compiler won't stop it.",
-        false_positives: "FFI hand-offs where ownership moves to foreign code; `ManuallyDrop` says the same thing \
-                          in the type and is preferred by the std docs.",
+        summary: "An `unsafe` block or `unsafe impl` with no comment justifying it",
+        harm: "`unsafe` moves the proof obligation from the compiler to the author. Without the written \
+               argument a reviewer can't check it, and a later edit can silently break it. This is the \
+               Rust project's own policy, but it is a review practice: the defect study found no \
+               measurable effect, so it is a note.",
+        false_positives: "A justification further away than the lines just above (e.g. one comment for a \
+                          group of `unsafe impl`s).",
+        evidence: Evidence::Consensus,
+        precision: "PENDING",
         sources: &[
-            "std::mem::forget: https://doc.rust-lang.org/std/mem/fn.forget.html",
-            "experiments/tests/memory.rs: forgetting_a_guard_keeps_the_lock, forgetting_a_file_leaks_its_descriptor",
+            "Clippy undocumented_unsafe_blocks (restriction): https://rust-lang.github.io/rust-clippy/master/index.html#undocumented_unsafe_blocks",
+            "Standard library dev guide, safety comments: https://std-dev-guide.rust-lang.org/policy/safety-comments.html",
         ],
     },
     Rule {
@@ -183,10 +225,11 @@ static RULES: &[Rule] = &[
         harm: "While the task is suspended it still holds the lock; any other task on that thread that calls \
                `lock()` blocks the thread, so the holder can never resume to release it. Verified deadlock \
                on a current-thread Tokio runtime; the same code with `tokio::sync::Mutex` finishes.",
-        false_positives: "A `lock()` method on a type that isn't a lock. Guards dropped by an inner scope \
-                          before the await are handled; guards moved elsewhere aren't tracked.",
+        false_positives: "A `lock()` method on a type that isn't a lock. Guards moved elsewhere aren't tracked.",
+        evidence: Evidence::Demonstrated,
+        precision: "PENDING",
         sources: &[
-            "Clippy await_holding_lock: https://rust-lang.github.io/rust-clippy/master/index.html#await_holding_lock",
+            "Clippy await_holding_lock (suspicious): https://rust-lang.github.io/rust-clippy/master/index.html#await_holding_lock",
             "Tokio Mutex docs, which mutex to use: https://docs.rs/tokio/latest/tokio/sync/struct.Mutex.html",
             "experiments/tests/concurrency.rs: std_lock_across_await_deadlocks",
         ],
@@ -199,7 +242,9 @@ static RULES: &[Rule] = &[
         harm: "An async task must yield at `.await`; `thread::sleep` parks the whole worker thread instead, \
                stalling every task scheduled on it. Measured: a 10 ms ticker stalled for the full 100 ms \
                sleep; with `tokio::time::sleep` it kept time.",
-        false_positives: "None in async code. Sync closures (e.g. inside `spawn_blocking`) aren't flagged.",
+        false_positives: "None in async code. Tests, and sync closures (e.g. inside `spawn_blocking`), aren't flagged.",
+        evidence: Evidence::Demonstrated,
+        precision: "PENDING",
         sources: &[
             "Tokio, spawn_blocking: https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html",
             "Alice Ryhl (Tokio maintainer), Async: What is blocking?: https://ryhl.io/blog/async-what-is-blocking/",
@@ -214,8 +259,10 @@ static RULES: &[Rule] = &[
         harm: "The error is the only signal that data didn't reach disk. Verified: on a full device \
                `write_all` fails with ENOSPC and the caller reports success. Yuan et al. (OSDI '14) found \
                most catastrophic failures in distributed systems came from mishandled errors.",
-        false_positives: "Best-effort writes where loss is acceptable (diagnostics to a closed stderr). Removals \
-                          and other cleanup aren't flagged.",
+        false_positives: "Best-effort writes where loss is acceptable. Writes to stdout/stderr and removals \
+                          aren't flagged.",
+        evidence: Evidence::Demonstrated,
+        precision: "PENDING",
         sources: &[
             "CWE-252 Unchecked Return Value: https://cwe.mitre.org/data/definitions/252.html",
             "Yuan et al., Simple Testing Can Prevent Most Critical Failures, OSDI 2014: https://www.usenix.org/conference/osdi14/technical-sessions/presentation/yuan",
@@ -224,33 +271,19 @@ static RULES: &[Rule] = &[
         ],
     },
     Rule {
-        id: "unused-io-amount",
-        category: Category::ErrorHandling,
-        severity: Severity::Error,
-        summary: "`.write(buf)` or `.read(buf)` whose byte count is thrown away",
-        harm: "`Write::write` may write fewer bytes than given and `Read::read` may fill less of the buffer; \
-               the count is the only way to know. Verified on a real Unix socket: one write of 8 MiB took \
-               a fraction. `write_all`/`read_exact` loop for you.",
-        false_positives: "A custom method named `write`/`read` with one argument that returns a `Result` but \
-                          isn't I/O.",
-        sources: &[
-            "std::io::Write::write: https://doc.rust-lang.org/std/io/trait.Write.html#tymethod.write",
-            "Clippy unused_io_amount (correctness): https://rust-lang.github.io/rust-clippy/master/index.html#unused_io_amount",
-            "experiments/tests/io.rs: write_can_be_partial_on_a_real_socket",
-        ],
-    },
-    Rule {
         id: "process-exit-in-library",
         category: Category::ErrorHandling,
-        severity: Severity::Warning,
-        summary: "`process::exit` outside a binary's entry files",
-        harm: "No destructors run, on this thread or any other: buffered writers aren't flushed, temp files \
-               stay, locks files stay locked. Verified: a `BufWriter`'s record never reached the file and the \
-               process exited 0. A library also takes the decision away from its caller.",
-        false_positives: "Library code that is really a CLI's internals and flushes first.",
+        severity: Severity::Note,
+        summary: "`process::exit` in a library crate",
+        harm: "No destructors run, on this thread or any other: buffered writers aren't flushed and temp \
+               files stay. Verified: a `BufWriter`'s record never reached the file and the process exited \
+               0. A library also takes the decision away from its caller. Binary crates (a `main.rs` and \
+               no `lib.rs`) aren't flagged.",
+        false_positives: "A library that is really a CLI's internals, exiting before any buffered state exists.",
+        evidence: Evidence::Demonstrated,
+        precision: "PENDING",
         sources: &[
             "std::process::exit: https://doc.rust-lang.org/std/process/fn.exit.html",
-            "Clippy exit: https://rust-lang.github.io/rust-clippy/master/index.html#exit",
             "experiments/tests/io.rs: process_exit_skips_destructors",
         ],
     },
@@ -263,9 +296,10 @@ static RULES: &[Rule] = &[
                `0.1 + 0.2 == 0.3` is false. Literals that are exact (0.0, 0.5, 1.0, 2.5) aren't flagged, \
                since equality with them is well defined.",
         false_positives: "Comparing against a value stored from the same literal (a sentinel).",
+        evidence: Evidence::Demonstrated,
+        precision: "no instances in the corpus",
         sources: &[
             "Goldberg, What Every Computer Scientist Should Know About Floating-Point Arithmetic (1991): https://docs.oracle.com/cd/E19957-01/806-3568/ncg_goldberg.html",
-            "Clippy float_cmp: https://rust-lang.github.io/rust-clippy/master/index.html#float_cmp",
             "experiments/tests/numeric.rs: inexact_literals_break_equality",
         ],
     },
@@ -275,8 +309,11 @@ static RULES: &[Rule] = &[
         severity: Severity::Note,
         summary: "`.len() as u32` (or any narrower integer)",
         harm: "`as` between integers truncates silently. Verified on a real 4 GiB + 1 buffer: \
-               `len() as u32` is 1, so a length prefix or index would be wrong with no error.",
-        false_positives: "Lengths bounded by construction (a fixed-size array). `try_from` documents and checks it.",
+               `len() as u32` is 1. Most lengths in the audit were bounded by their domain (a count of \
+               render targets), so this is a note.",
+        false_positives: "Lengths bounded by construction. `try_from` documents and checks it.",
+        evidence: Evidence::Demonstrated,
+        precision: "PENDING",
         sources: &[
             "Rust Reference, numeric cast semantics: https://doc.rust-lang.org/reference/expressions/operator-expr.html#numeric-cast",
             "CWE-197 Numeric Truncation Error: https://cwe.mitre.org/data/definitions/197.html",
@@ -287,51 +324,18 @@ static RULES: &[Rule] = &[
         id: "deny-warnings",
         category: Category::Maintainability,
         severity: Severity::Warning,
-        summary: "`#![deny(warnings)]` in source",
+        summary: "`#![deny(warnings)]` in a library or binary crate root",
         harm: "New compiler releases add lints by design (adding one is not a breaking change), so code that \
                builds today stops building for downstream users after a toolchain update. Verified: the same \
                file builds on Rust 1.76 and fails on 1.99.",
-        false_positives: "None; `RUSTFLAGS=-D warnings` in CI gives the strictness without the breakage.",
+        false_positives: "None; `RUSTFLAGS=-D warnings` in CI gives the strictness without the breakage. \
+                          Examples, tests and benches aren't flagged.",
+        evidence: Evidence::Demonstrated,
+        precision: "PENDING",
         sources: &[
             "Rust Design Patterns, #![deny(warnings)] anti-pattern: https://rust-unofficial.github.io/patterns/anti_patterns/deny-warnings.html",
             "RFC 1105, API evolution (new lints are minor changes): https://rust-lang.github.io/rfcs/1105-api-evolution.html",
             "experiments/deny-warnings/run.sh",
         ],
-    },
-    Rule {
-        id: "complex-function",
-        category: Category::Maintainability,
-        severity: Severity::Note,
-        summary: "A function above the cognitive-complexity limit",
-        harm: "PENDING STUDY",
-        false_positives: "Large `match` tables score low here by design; long linear functions too.",
-        sources: &["G. Ann Campbell, Cognitive Complexity (SonarSource, 2018): https://www.sonarsource.com/docs/CognitiveComplexity.pdf"],
-    },
-    Rule {
-        id: "long-function",
-        category: Category::Maintainability,
-        severity: Severity::Note,
-        summary: "A function above the code-line limit",
-        harm: "PENDING STUDY",
-        false_positives: "Generated or table-like code.",
-        sources: &["Clippy too_many_lines: https://rust-lang.github.io/rust-clippy/master/index.html#too_many_lines"],
-    },
-    Rule {
-        id: "deep-nesting",
-        category: Category::Maintainability,
-        severity: Severity::Note,
-        summary: "A function nested deeper than the limit",
-        harm: "PENDING STUDY",
-        false_positives: "Closures count as a level.",
-        sources: &["CWE-1124 Excessively Deep Nesting: https://cwe.mitre.org/data/definitions/1124.html"],
-    },
-    Rule {
-        id: "too-many-params",
-        category: Category::Maintainability,
-        severity: Severity::Note,
-        summary: "A function with more parameters than the limit",
-        harm: "PENDING STUDY",
-        false_positives: "Constructors for plain data.",
-        sources: &["Clippy too_many_arguments: https://rust-lang.github.io/rust-clippy/master/index.html#too_many_arguments"],
     },
 ];

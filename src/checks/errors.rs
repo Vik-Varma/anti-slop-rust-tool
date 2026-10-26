@@ -1,6 +1,6 @@
 use syn::spanned::Spanned;
 
-use super::{call_path, is_method, path_ends_with, peel, strip_unwrapping};
+use super::{call_path, is_method, path_ends_with, peel};
 use crate::analyzer::Analyzer;
 use crate::context::FileKind;
 
@@ -38,10 +38,7 @@ pub fn stmt(a: &mut Analyzer, node: &syn::Stmt) {
         },
         syn::Stmt::Expr(e, Some(_)) => match is_method(e, "ok", 0) {
             Some(m) => (&*m.receiver, "`.ok();`"),
-            None => {
-                unused_amount(a, e, false);
-                return;
-            }
+            None => return,
         },
         _ => return,
     };
@@ -52,14 +49,15 @@ pub fn stmt(a: &mut Analyzer, node: &syn::Stmt) {
             format!("{how} throws away the error from `{op}`: the data may not have been written"),
         );
     }
-    if matches!(node, syn::Stmt::Local(_)) {
-        unused_amount(a, discarded, true);
-    }
 }
 
 fn persist_op(e: &syn::Expr) -> Option<String> {
     match peel(e) {
         syn::Expr::MethodCall(m) if PERSIST_METHODS.contains(&m.method.to_string().as_str()) => {
+            // A failed write to the terminal has nowhere to be reported; ignoring it is normal.
+            if mentions_std_stream(&m.receiver) {
+                return None;
+            }
             Some(format!(".{}()", m.method))
         }
         syn::Expr::Call(c) => {
@@ -73,29 +71,7 @@ fn persist_op(e: &syn::Expr) -> Option<String> {
     }
 }
 
-/// `w.write(buf)?;` and `r.read(buf)?;` drop the count of bytes moved, which may be less than
-/// `buf.len()`. Only flagged when the result is clearly a `Result` (`?`, `unwrap`, `expect`,
-/// `let _ =`), so a custom `write(&mut self, x)` returning `()` isn't mistaken for `io::Write`.
-fn unused_amount(a: &mut Analyzer, e: &syn::Expr, discarded_by_let: bool) {
-    let peeled = peel(e);
-    let inner = strip_unwrapping(peeled);
-    if std::ptr::eq(inner, peeled) && !discarded_by_let {
-        return;
-    }
-    let Some(m) = is_method(inner, "write", 1).or_else(|| is_method(inner, "read", 1)) else {
-        return;
-    };
-    let fix = if m.method == "write" {
-        "write_all"
-    } else {
-        "read_exact"
-    };
-    a.emit(
-        "unused-io-amount",
-        m.method.span(),
-        format!(
-            "`.{}()` may move fewer bytes than asked and the count is ignored; use `.{fix}()`",
-            m.method
-        ),
-    );
+fn mentions_std_stream(e: &syn::Expr) -> bool {
+    let text = quote::quote!(#e).to_string();
+    text.contains("stdout") || text.contains("stderr")
 }

@@ -138,6 +138,8 @@ def main():
     results = []
     candidates = [(m, "log") for m in METRICS + FEATURES] + [(r, "any") for r in RULES]
     for name, kind in candidates:
+        if name not in rows[0]:
+            continue  # data mined by a build without this rule
         x = np.array([float(r[name]) for r in rows])
         exposed = int((x > 0).sum())
         if exposed < MIN_EXPOSED:

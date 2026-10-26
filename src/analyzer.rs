@@ -23,9 +23,18 @@ pub struct FileReport {
 /// Parses `source` and runs every check over it. A file that doesn't parse yields an error,
 /// never a partial report, so a caller can't mistake "unparsed" for "clean".
 pub fn analyze_source(path: &Path, source: &str) -> Result<FileReport, syn::Error> {
+    analyze_source_as(path, source, FileKind::of(path))
+}
+
+/// As [`analyze_source`], with the file's kind decided by the caller (from the crate layout).
+pub fn analyze_source_as(
+    path: &Path,
+    source: &str,
+    kind: FileKind,
+) -> Result<FileReport, syn::Error> {
+    let source = &blank_frontmatter(source);
     let file = syn::parse_file(source)?;
     let lines: Vec<&str> = source.lines().collect();
-    let kind = FileKind::of(path);
     let mut analyzer = Analyzer {
         path: path.to_path_buf(),
         kind,
@@ -50,6 +59,34 @@ pub fn analyze_source(path: &Path, source: &str) -> Result<FileReport, syn::Erro
     Ok(report)
 }
 
+/// Cargo scripts open with a `---` manifest block that `syn` doesn't parse. Blanks it, line for
+/// line, so every reported line number still matches the file.
+fn blank_frontmatter(source: &str) -> std::borrow::Cow<'_, str> {
+    let mut lines: Vec<&str> = source.split('\n').collect();
+    let first = usize::from(
+        lines
+            .first()
+            .is_some_and(|l| l.starts_with("#!") && !l.starts_with("#![")),
+    );
+    let Some(open) = lines.get(first) else {
+        return source.into();
+    };
+    if !open.starts_with("---") {
+        return source.into();
+    }
+    let Some(close) = lines
+        .iter()
+        .skip(first + 1)
+        .position(|l| l.trim_end() == "---")
+    else {
+        return source.into();
+    };
+    for line in &mut lines[first..=first + 1 + close] {
+        *line = "";
+    }
+    lines.join("\n").into()
+}
+
 pub struct Analyzer<'a> {
     pub path: PathBuf,
     pub kind: FileKind,
@@ -72,9 +109,14 @@ impl Analyzer<'_> {
         if self.suppressions.allows(rule, start.line) {
             return;
         }
-        let severity = rules::get(rule)
-            .map(|r| r.severity)
-            .unwrap_or(crate::Severity::Warning);
+        let Some(entry) = rules::get(rule) else {
+            debug_assert!(
+                false,
+                "check emitted `{rule}`, which has no catalogue entry"
+            );
+            return;
+        };
+        let severity = entry.severity;
         self.report.findings.push(Finding {
             rule,
             severity,
@@ -107,13 +149,7 @@ impl Analyzer<'_> {
         }
     }
 
-    fn visit_function(
-        &mut self,
-        attrs: &[syn::Attribute],
-        sig: &syn::Signature,
-        block: &syn::Block,
-        scope: Scope,
-    ) {
+    fn visit_function(&mut self, sig: &syn::Signature, block: &syn::Block, scope: Scope) {
         let start = sig.span().start().line;
         let end = block.span().end().line;
         let test = scope.test;
@@ -121,7 +157,7 @@ impl Analyzer<'_> {
         let m = metrics::measure(name, sig, block, start, end, self.lines, test);
         self.report.functions.push(m);
         self.with_scope(scope, |a| {
-            checks::function(a, attrs, sig, block);
+            checks::function(a, sig, block);
             a.visit_block(block);
         });
     }
@@ -191,7 +227,7 @@ impl<'ast> Visit<'ast> for Analyzer<'_> {
 
     fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
         let scope = self.function_scope(&node.attrs, &node.sig);
-        self.visit_function(&node.attrs, &node.sig, &node.block, scope);
+        self.visit_function(&node.sig, &node.block, scope);
     }
 
     fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
@@ -212,7 +248,7 @@ impl<'ast> Visit<'ast> for Analyzer<'_> {
                     syn::ImplItem::Fn(f) => {
                         let mut s = a.function_scope(&f.attrs, &f.sig);
                         s.in_drop = is_drop && f.sig.ident == "drop";
-                        a.visit_function(&f.attrs, &f.sig, &f.block, s);
+                        a.visit_function(&f.sig, &f.block, s);
                     }
                     other => a.visit_impl_item(other),
                 }
@@ -230,7 +266,7 @@ impl<'ast> Visit<'ast> for Analyzer<'_> {
     fn visit_trait_item_fn(&mut self, node: &'ast syn::TraitItemFn) {
         if let Some(block) = &node.default {
             let scope = self.function_scope(&node.attrs, &node.sig);
-            self.visit_function(&node.attrs, &node.sig, block, scope);
+            self.visit_function(&node.sig, block, scope);
         }
     }
 

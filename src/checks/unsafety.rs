@@ -21,12 +21,6 @@ pub fn call(a: &mut Analyzer, node: &syn::ExprCall) {
             path.span(),
             "`mem::uninitialized()` is undefined behaviour for almost every type",
         );
-    } else if path_ends_with(path, &["mem", "forget"]) && !a.scope().test {
-        a.emit(
-            "mem-forget",
-            path.span(),
-            "`mem::forget` skips the destructor; use `ManuallyDrop` to say so in the type",
-        );
     }
 }
 
@@ -68,15 +62,13 @@ fn holds_maybe_uninit(path: &syn::Path) -> bool {
 pub fn unsafe_block(a: &mut Analyzer, node: &syn::ExprUnsafe) {
     let line = node.unsafe_token.span().start().line;
     let first_inner = node.block.brace_token.span.open().start().line + 1;
-    if has_safety_comment(a.lines, line)
-        || comment_says_safety(a.lines.get(first_inner - 1).copied())
-    {
+    if has_safety_comment(a.lines, line) || has_comment(a.lines.get(first_inner - 1).copied()) {
         return;
     }
     a.emit(
-        "unsafe-without-safety-comment",
+        "unsafe-without-comment",
         node.unsafe_token.span(),
-        "`unsafe` block with no `// SAFETY:` comment saying why its preconditions hold",
+        "`unsafe` block with no comment saying why its preconditions hold",
     );
 }
 
@@ -86,23 +78,24 @@ pub fn unsafe_impl(a: &mut Analyzer, node: &syn::ItemImpl) {
         return;
     }
     a.emit(
-        "unsafe-without-safety-comment",
+        "unsafe-without-comment",
         token.span(),
-        "`unsafe impl` with no `// SAFETY:` comment saying why the trait's contract holds",
+        "`unsafe impl` with no comment saying why the trait's contract holds",
     );
 }
 
-fn comment_says_safety(line: Option<&str>) -> bool {
-    line.and_then(|l| l.find("//").map(|at| &l[at..]))
-        .is_some_and(|c| c.to_ascii_lowercase().contains("safety:"))
+fn has_comment(line: Option<&str>) -> bool {
+    line.and_then(|l| l.find("//").or_else(|| l.find("/*")))
+        .is_some()
 }
 
-/// A `// SAFETY:` comment on the line itself, or in the run of comment and attribute lines just
-/// above it (the style the standard library and Clippy's `undocumented_unsafe_blocks` accept).
-/// For `let x = unsafe { .. }` and other statements that start on the line above, that line
-/// counts too.
+/// A comment justifying the `unsafe`: on its own line, in the run of comment and attribute lines
+/// just above it, or (for `let x = unsafe { .. }` split over lines) above the statement's first
+/// line. Any wording counts. The std library writes `// SAFETY:`, but the audit in
+/// docs/EVIDENCE.md found real justifications in other words, and the rule is about there being
+/// an argument at all.
 fn has_safety_comment(lines: &[&str], line: usize) -> bool {
-    if comment_says_safety(lines.get(line.wrapping_sub(1)).copied()) {
+    if has_comment(lines.get(line.wrapping_sub(1)).copied()) {
         return true;
     }
     let mut i = line.saturating_sub(1);
@@ -110,15 +103,14 @@ fn has_safety_comment(lines: &[&str], line: usize) -> bool {
     while i > 0 {
         let t = lines[i - 1].trim();
         if t.starts_with("//") || t.starts_with("/*") || t.starts_with('*') {
-            if t.to_ascii_lowercase().contains("safety:") {
+            return true;
+        } else if t.starts_with("#[") {
+            if has_comment(Some(t)) {
                 return true;
             }
-        } else if t.starts_with("#[") {
-            // An attribute between the comment and the block.
         } else if !stepped_over_code && !t.is_empty() && !t.ends_with(';') && !t.ends_with('}') {
-            // The opening line of a multi-line statement, e.g. `let x =` then `unsafe {`.
             stepped_over_code = true;
-            if comment_says_safety(Some(t)) {
+            if has_comment(Some(t)) {
                 return true;
             }
         } else {

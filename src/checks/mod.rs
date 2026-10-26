@@ -7,7 +7,6 @@ mod errors;
 mod hygiene;
 mod numeric;
 mod panics;
-mod shape;
 mod unsafety;
 
 use syn::punctuated::Punctuated;
@@ -16,16 +15,9 @@ use crate::analyzer::Analyzer;
 
 pub fn file_level(a: &mut Analyzer, file: &syn::File) {
     hygiene::file_attributes(a, &file.attrs);
-    shape::file(a);
 }
 
-pub fn function(
-    a: &mut Analyzer,
-    _attrs: &[syn::Attribute],
-    sig: &syn::Signature,
-    block: &syn::Block,
-) {
-    shape::function(a, sig);
+pub fn function(a: &mut Analyzer, sig: &syn::Signature, block: &syn::Block) {
     if sig.asyncness.is_some() {
         concurrency::async_body(a, block);
     }
@@ -160,24 +152,5 @@ pub fn is_method<'a>(e: &'a syn::Expr, name: &str, args: usize) -> Option<&'a sy
     match peel(e) {
         syn::Expr::MethodCall(m) if m.method == name && m.args.len() == args => Some(m),
         _ => None,
-    }
-}
-
-/// Strips the error-unwrapping tail of an expression: `?`, `.unwrap()`, `.expect(..)`,
-/// `.unwrap_or_else(..)`, `.ok()`. Returns what's left.
-pub fn strip_unwrapping(mut e: &syn::Expr) -> &syn::Expr {
-    loop {
-        e = match peel(e) {
-            syn::Expr::Try(t) => &t.expr,
-            syn::Expr::MethodCall(m)
-                if matches!(
-                    m.method.to_string().as_str(),
-                    "unwrap" | "expect" | "unwrap_or_else" | "ok"
-                ) =>
-            {
-                &m.receiver
-            }
-            other => return other,
-        }
     }
 }

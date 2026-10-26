@@ -3,6 +3,10 @@ use syn::spanned::Spanned;
 use crate::analyzer::Analyzer;
 
 pub fn file_attributes(a: &mut Analyzer, attrs: &[syn::Attribute]) {
+    // Only crate roots that downstream users build; an example or test breaking hurts nobody else.
+    if !a.kind.ships() {
+        return;
+    }
     for attr in attrs {
         if !matches!(attr.style, syn::AttrStyle::Inner(_)) {
             continue;

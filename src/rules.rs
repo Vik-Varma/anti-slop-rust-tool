@@ -268,7 +268,7 @@ static RULES: &[Rule] = &[
         harm: "The error is the only signal that data didn't reach disk. Verified: on a full device \
                `write_all` fails with ENOSPC and the caller reports success. In five distributed systems, \
                Yuan et al. (OSDI '14) traced 92% of catastrophic failures to incorrect handling of \
-               non-fatal errors that the software had signalled.",
+               non-fatal errors that the software had signalled; in 25%, the handler simply ignored the error.",
         false_positives: "Best-effort writes where loss is acceptable. Writes to stdout/stderr and removals \
                           aren't flagged.",
         evidence: Evidence::Demonstrated,

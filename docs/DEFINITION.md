@@ -51,16 +51,22 @@ These are widely called bad. They fail the definition, and [EVIDENCE.md](EVIDENC
 numbers for each:
 
 - **High cyclomatic or cognitive complexity, long functions, deep nesting, many parameters.**
-  Each strongly predicts later bug fixes (odds ratios of 2 to 16), but that is because each
-  measures size. Once function size is controlled for, none adds anything, and the result held
-  in a preregistered replication on 15 new projects. Bigger functions do get more fixes in
-  total, but not more fixes per line.
+  Each strongly predicts later bug fixes (odds ratios of 1.7 to 16 before adjustment), but mostly
+  because each measures size. Once function size is controlled for, cyclomatic and cognitive
+  complexity, length and complexity thresholds add nothing, and that held in a preregistered
+  replication on 15 new projects. Nesting depth and parameter count stayed slightly above 1 in
+  both corpora (odds ratios 1.06 to 1.18 per doubling), but not significantly in the
+  replication: a small effect isn't ruled out, and it would be far too weak to call code bad on.
+  Bigger functions do get more fixes in total, but not more fixes per line. (This is about
+  defects. Cognitive complexity is meant to measure understandability, which Muñoz Barón et al.,
+  ESEM 2020, found it partly does; that question isn't tested here.)
 - **TODO/FIXME/HACK comments**, and the "deferral" and "hedging" phrases that LLM-slop linters
   look for. No size-independent link to bug fixes replicated.
 - **Magic numbers, `.clone()` calls, boolean parameters, `as` casts in general.** There was no
   consistent effect after size, and magic numbers pointed the other way.
-- **`unimplemented!()`**: the standard library documents it as a statement that code won't be
-  written, and the audit found it used that way.
+- **`unimplemented!()`**: unlike `todo!()`, which "conveys an intent of implementing the
+  functionality later", the standard library says it "makes no such claims", and the audit found
+  it marking unsupported features and mocks.
 - **`mem::forget`**: it can leak, but in the audit every use was a deliberate hand-off of
   ownership.
 
@@ -75,3 +81,10 @@ defects, so a tool shouldn't call it bad.
   counts some non-fixes; the precision check is in [EVIDENCE.md](EVIDENCE.md).
 - Findings that are real but rare in mature projects (undefined behaviour, deadlocks) can't be
   tested for fix-proneness; their evidence is the reproduced failure.
+- The audit judged code that had already passed review and shipped, which flatters no rule: what
+  survives review is what reviewers decided was fine. Google found developers rated 74% of
+  issues flagged at compile time "real problems", against 21% of those found in checked-in code
+  (Sadowski et al., CACM 2018). The notes' precision on new, unreviewed code is likely higher than
+  the audit shows; that hasn't been measured.
+- The 50% bar and Google's 10% aren't the same measure. Google counts developers' "not useful"
+  clicks on fresh results; this audit is an auditor's judgment of whether old findings can fail.

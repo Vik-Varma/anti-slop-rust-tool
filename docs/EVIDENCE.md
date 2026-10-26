@@ -59,8 +59,14 @@ the pattern at all.
 
 Size itself is the strongest signal: each doubling of a function's lines doubles its odds of a
 later fix (OR 2.13). Every metric above correlates with size (Spearman ρ 0.40 to 0.73). This is
-the confound El Emam et al. (IEEE TSE 2001) showed for object-oriented metrics, and that Herraiz
-& Hassan (2010) and Landman et al. (2016) found between McCabe complexity and lines of code.
+the confound El Emam et al. (IEEE TSE 2001) showed for object-oriented metrics; a published
+comment disputes how they treated size (Evanco, IEEE TSE 2003). Herraiz & Hassan (2010) found
+complexity metrics track lines of code closely in C. Landman et al. (2016), on 24 million Java
+methods and C functions, found the correlation "only moderate" and concluded CC is not redundant
+with size. The data here agrees the two differ (ρ = 0.69), but the part of complexity that isn't
+size didn't predict fixes. Results were the same with size alone as the control (the
+"size-adjusted" column of `study/results.md`), so adjusting for prior churn as well isn't what
+removed the effects.
 Clippy reached the same place from experience: its `cognitive_complexity` lint now sits in the
 restriction group because "the true Cognitive Complexity of a method is not something we can
 calculate using modern technology", and it was kept there "so as to not mislead users into using
@@ -84,11 +90,11 @@ had point estimates above 1 in both corpora (1.18, then 1.92), but neither survi
 multiple-comparison correction, it wasn't a preregistered hypothesis, and only 209 replication
 functions had one. That is a lead for a future preregistered test, not evidence.
 
-Evidence for TODO comments does exist elsewhere, in a narrower setting. Yuan et al. found that in
-35% of catastrophic failures in five distributed systems, the bug was in an error handler that
-was empty, only logged, aborted on an over-general exception, or carried a "FIXME" or "TODO".
-That is a TODO inside an error handler in Java, not a TODO anywhere in a Rust function. It
-doesn't contradict the null result here, but it suggests a narrower hypothesis worth testing.
+Other studies agree the evidence on TODO comments is weak. Wehaibi et al. (SANER 2016) found "no
+clear trend when it comes to defects and self-admitted technical debt" across five projects. A
+2025 method-level study (arXiv 2411.13777) links such methods to bugs, but notes they are also
+larger, which is the confound controlled for here. Yuan et al. counted a "TODO" in an error
+handler in only 2% of the catastrophic failures they studied.
 
 Full tables, including the flexible-size and changed-functions-only robustness checks, are in
 `study/results.md` and `study/antislop-phrases.md`.
@@ -116,6 +122,9 @@ Full tables, including the flexible-size and changed-functions-only robustness c
   edited to fix a bug that lives elsewhere.
 - **Power.** Rare patterns (deferral and hedging phrases, `panic-in-drop`) have wide intervals.
   "No evidence" is not "evidence of no effect" for them.
+- **Audit population.** The audit judged mature, already-reviewed code. Google found developers
+  rated 74% of compile-time findings real problems against 21% of findings in checked-in code
+  (Sadowski et al., CACM 2018), so precision on new code is likely higher than measured here.
 - **Audit.** The validation sample was judged by two raters: the author, and an independent agent
   blind to these docs that traced callers. Agreement was moderate (80%, κ = 0.54). Where they
   disagreed, the rater who traced the code was usually right, and its verdicts were taken. Samples
@@ -134,6 +143,21 @@ Papers were checked against their publisher records (Crossref DOIs below). The Y
 Tricorder figures were checked against the papers' PDFs, and the Cloudflare quote against the
 post-mortem.
 
+## Candidates not yet tested
+
+Well-sourced patterns that a syntax check might catch, raised by the source reviews
+(`docs/research/`). None has been through the experiments or the audit, so none is a rule yet.
+
+- **Double locking** (`m.lock()` twice in one scope, or a guard kept alive by a `match` or
+  `if let` scrutinee while the same lock is taken again). Qin et al. (PLDI 2020) found "30 of
+  [38]" lock-related blocking bugs in real Rust programs were double locks.
+- **Inconsistent clone edits.** Juergens et al. (ICSE 2009) found unintentionally inconsistent
+  changes to cloned code frequently led to faults. Needs history, not one snapshot.
+- **`pub unsafe fn` without a `# Safety` doc section** (Clippy `missing_safety_doc`, on by default).
+- **`let _ = <future>`** (Clippy `let_underscore_future`): the future is dropped unpolled.
+- **References taken to a `static mut`**, the precise construct the Edition Guide calls instant UB.
+- **`pub fn` returning `Result<_, ()>`** (API Guidelines C-GOOD-ERR).
+
 ## References
 
 - McCabe, T. J. A Complexity Measure. IEEE TSE 2(4), 1976. doi:10.1109/TSE.1976.233837
@@ -143,6 +167,12 @@ post-mortem.
 - Landman, D., Serebrenik, A., Bouwers, E., Vinju, J. Empirical analysis of the relationship between CC and SLOC in a large corpus of Java methods and C functions. J. Software: Evolution and Process 28(7), 2016. doi:10.1002/smr.1760
 - Mockus, A., Votta, L. Identifying reasons for software changes using historic databases. ICSM 2000. doi:10.1109/ICSM.2000.883028
 - Herzig, K., Just, S., Zeller, A. It's not a bug, it's a feature: how misclassification impacts bug prediction. ICSE 2013. doi:10.1109/ICSE.2013.6606585
+- Evanco, W. M. Comments on "The confounding effect of class size on the validity of object-oriented metrics". IEEE TSE 29(7), 2003. doi:10.1109/TSE.2003.1214331
+- Muñoz Barón, M., Wyrich, M., Wagner, S. An Empirical Validation of Cognitive Complexity as a Measure of Source Code Understandability. ESEM 2020. doi:10.1145/3382494.3410636
+- Wehaibi, S., Shihab, E., Guerrouj, L. Examining the impact of self-admitted technical debt on software quality. SANER 2016. doi:10.1109/SANER.2016.72
+- Juergens, E., Deissenboeck, F., Hummel, B., Wagner, S. Do code clones matter? ICSE 2009.
+- Qin, B. et al. Understanding Memory and Thread Safety Practices and Issues in Real-World Rust Programs. PLDI 2020.
+- Sadowski, C., Aftandilian, E., Eagle, A., Miller-Cushon, L., Jaspan, C. Lessons from Building Static Analysis Tools at Google. CACM 61(4), 2018. doi:10.1145/3188720
 - Yuan, D. et al. Simple Testing Can Prevent Most Critical Failures. OSDI 2014. <https://www.usenix.org/conference/osdi14/technical-sessions/presentation/yuan>
 - Sadowski, C., van Gogh, J., Jaspan, C., Söderberg, E., Winter, C. Tricorder: Building a Program Analysis Ecosystem. ICSE 2015. doi:10.1109/ICSE.2015.76
 - Cloudflare. Cloudflare outage on November 18, 2025. <https://blog.cloudflare.com/18-november-2025-outage/>

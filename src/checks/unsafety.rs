@@ -113,7 +113,7 @@ fn has_safety_comment(a: &Analyzer, line: usize) -> bool {
     let mut n = line.saturating_sub(1);
     let mut stepped_over_code = false;
     while n > 0 {
-        let l = info(n).expect("line in range");
+        let Some(l) = info(n) else { return false };
         let text = a.lines.get(n - 1).map(|t| t.trim()).unwrap_or_default();
         if l.only_comment() {
             if !l.doc {

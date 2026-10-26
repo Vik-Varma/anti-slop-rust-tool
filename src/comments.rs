@@ -110,11 +110,15 @@ pub fn lines(source: &str) -> Vec<Line> {
                 out.last_mut().expect("line").code = true;
                 // A character literal is `'x'` or `'\..'`; anything else is a lifetime or label.
                 if next == Some('\\') {
-                    i += 2;
+                    // Skip the backslash and the escaped character (which may itself be `'`),
+                    // then up to the closing quote (`'\u{1F600}'` has more before it).
+                    i += 3;
                     while i < chars.len() && chars[i] != '\'' && chars[i] != '\n' {
                         i += 1;
                     }
-                    i += 1;
+                    if chars.get(i) == Some(&'\'') {
+                        i += 1;
+                    }
                 } else if chars.get(i + 2) == Some(&'\'') {
                     i += 3;
                 } else {
@@ -130,6 +134,11 @@ pub fn lines(source: &str) -> Vec<Line> {
     }
     for (line, flags) in out.iter_mut().zip(doc_flags) {
         line.doc = !flags.is_empty() && flags.iter().all(|d| *d);
+    }
+    // Callers index this by source line; never return fewer lines than the source has.
+    let n = source.split('\n').count();
+    if out.len() < n {
+        out.resize(n, Line::default());
     }
     out
 }
@@ -183,6 +192,15 @@ fn skip_string(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn escaped_quote_chars_dont_desync_lines() {
+        let src = "let q = '\\'';\nlet b = '\\\\'; // after\nlet e = '\\u{1F600}';\n// last\n";
+        let l = lines(src);
+        assert_eq!(l.len(), src.split('\n').count());
+        assert_eq!(l[1].comment, "// after");
+        assert!(l[3].only_comment());
+    }
 
     #[test]
     fn strings_chars_lifetimes_and_comments() {

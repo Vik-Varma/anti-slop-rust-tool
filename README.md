@@ -86,7 +86,11 @@ cargo test                                   # the tool
 (cd experiments && cargo test)               # the failure experiments
 experiments/miri/run.sh                      # needs nightly + miri
 experiments/deny-warnings/run.sh             # needs `rustup toolchain install 1.76`
+python3 study/check_sources.py               # every cited page still says what it's cited for
 ```
+
+CI runs the tool's tests and the experiments on Linux, Windows and macOS, and re-checks the
+sources weekly.
 
 The study (`study/`) needs Python 3 with numpy and scipy, and clones of the repositories in
 `study/repos.txt` and `study/repos-replication.txt`. `study/corpus-heads.txt` records the commits

@@ -54,12 +54,13 @@ static NESTING: RuleMeta = RuleMeta {
     evidence: Evidence::Moderate,
     default_enabled: true,
     summary: "Control flow is nested deeper than the threshold",
-    rationale: "Every nesting level adds context the reader has to hold in mind. Controlled \
-experiments (e.g. Johnson et al., 'An Empirical Study Assessing Source Code Readability in \
-Comprehension', ICSME 2019) found deeper nesting reduced comprehension. Early returns, `?`, \
+    rationale: "Every nesting level adds context the reader has to hold in mind. A controlled \
+experiment (Johnson et al., ICSME 2019) found deeper nesting slowed comprehension, although its \
+nested snippets were also longer, so the evidence for comprehension is moderate and for defects \
+weak. The threshold is a convention, not an empirically derived limit. Early returns, `?`, \
 `let ... else` and helper functions flatten the code.",
     sources: &[
-        "Johnson, Lubo, Yedla, Cáceres, Erwig. An Empirical Study Assessing Source Code Readability in Comprehension. ICSME 2019. doi:10.1109/ICSME.2019.00085",
+        "Johnson, Lubo, Yedla, Aponte, Sharif. An Empirical Study Assessing Source Code Readability in Comprehension. ICSME 2019, pp. 513-523.",
         "validation/mining (this repository)",
     ],
 };
@@ -68,15 +69,18 @@ static PARAMS: RuleMeta = RuleMeta {
     id: "too-many-params",
     category: Category::Maintainability,
     severity: Severity::Warning,
-    evidence: Evidence::Weak,
+    evidence: Evidence::Moderate,
     default_enabled: true,
     summary: "Function takes more parameters than the threshold",
     rationale: "Long parameter lists are hard to call correctly: arguments of the same type can be \
-swapped without a compile error. Clippy's `too_many_arguments` (complexity group, default 7) \
-flags them. Group related values into a struct or use a builder. Trait implementations are \
-skipped because the trait dictates the signature.",
+swapped without a compile error. Mining 200 MLOC at Google, Rice et al. (OOPSLA 2017) found that \
+'the probability of an argument selection defect increases markedly when methods have more \
+than five arguments'. Group related values into a struct or use a builder. Trait \
+implementations and `extern` functions are skipped because their signature is dictated \
+elsewhere.",
     sources: &[
-        "Clippy lint `too_many_arguments`.",
+        "Rice, Aftandilian, Jaspan, Johnston, Pradel, Arroyo-Paredes. Detecting argument selection defects. OOPSLA 2017 (PACMPL 1, art. 104).",
+        "Clippy lint `too_many_arguments` (default 7).",
         "M. Fowler. Refactoring, 2nd ed. 2018 — 'Long Parameter List'.",
     ],
 };
@@ -139,7 +143,7 @@ impl Rule for TooManyParams {
     }
     fn check(&self, input: &Input, sink: &mut Sink) {
         let max = input.config.max_params;
-        for f in input.fns.iter().filter(|f| !f.is_trait_impl && f.params > max) {
+        for f in input.fns.iter().filter(|f| !f.is_trait_impl && !f.is_extern && f.params > max) {
             sink.emit(f.line, f.column, format!("`{}` takes {} parameters (max {max})", f.name, f.params));
         }
     }

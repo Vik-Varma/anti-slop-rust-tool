@@ -69,3 +69,79 @@ pub fn contains_method_call(e: &Expr, names: &[&str]) -> bool {
     syn::visit::Visit::visit_expr(&mut f, e);
     f.found
 }
+
+/// Source-like rendering of an expression, used to compare receivers.
+pub fn expr_key(e: &Expr) -> String {
+    use quote::ToTokens;
+    peel(e).to_token_stream().to_string()
+}
+
+/// Resolves paths in a file against its `use` declarations.
+#[derive(Default, Debug)]
+pub struct Imports {
+    /// local name -> full path segments
+    map: std::collections::HashMap<String, Vec<String>>,
+}
+
+impl Imports {
+    pub fn collect(file: &syn::File) -> Imports {
+        struct V(Imports);
+        impl<'ast> syn::visit::Visit<'ast> for V {
+            fn visit_item_use(&mut self, u: &'ast syn::ItemUse) {
+                let mut prefix = Vec::new();
+                walk_use(&u.tree, &mut prefix, &mut self.0.map);
+            }
+        }
+        let mut v = V(Imports::default());
+        syn::visit::Visit::visit_file(&mut v, file);
+        v.0
+    }
+
+    /// Full path of `path` as segments, expanding a leading imported name.
+    pub fn resolve(&self, path: &syn::Path) -> Vec<String> {
+        let segs: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
+        if let Some(first) = segs.first() {
+            if let Some(full) = self.map.get(first) {
+                let mut out = full.clone();
+                out.extend(segs[1..].iter().cloned());
+                return out;
+            }
+        }
+        segs
+    }
+}
+
+fn walk_use(tree: &syn::UseTree, prefix: &mut Vec<String>, map: &mut std::collections::HashMap<String, Vec<String>>) {
+    match tree {
+        syn::UseTree::Path(p) => {
+            prefix.push(p.ident.to_string());
+            walk_use(&p.tree, prefix, map);
+            prefix.pop();
+        }
+        syn::UseTree::Name(n) => {
+            let name = n.ident.to_string();
+            let mut full = prefix.clone();
+            if name == "self" {
+                if let Some(last) = prefix.last() {
+                    map.insert(last.clone(), full);
+                }
+            } else {
+                full.push(name.clone());
+                map.insert(name, full);
+            }
+        }
+        syn::UseTree::Rename(r) => {
+            let mut full = prefix.clone();
+            if r.ident != "self" {
+                full.push(r.ident.to_string());
+            }
+            map.insert(r.rename.to_string(), full);
+        }
+        syn::UseTree::Group(g) => {
+            for t in &g.items {
+                walk_use(t, prefix, map);
+            }
+        }
+        syn::UseTree::Glob(_) => {}
+    }
+}

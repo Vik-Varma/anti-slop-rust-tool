@@ -28,7 +28,8 @@ and not the others, the bug survives. Juergens et al. (ICSE 2009) found that inc
 changed clones contained faults in practice. Not all duplication is harmful (Kapser & Godfrey, \
 2008), so only long runs of identical tokens are reported.",
     sources: &[
-        "Juergens, Deissenboeck, Hummel, Wagner. Do code clones matter? ICSE 2009. doi:10.1109/ICSE.2009.5070547",
+        "Juergens, Deissenboeck, Hummel, Wagner. Do code clones matter? ICSE 2009, pp. 485-495. arXiv:1701.05472",
+        "Rahman, Bird, Devanbu. Clones: what is that smell? EMSE 17, 2012 (found clones not more bug-prone).",
         "Kapser, Godfrey. 'Cloning considered harmful' considered harmful. EMSE 13(6), 2008. doi:10.1007/s10664-008-9076-6",
     ],
 };

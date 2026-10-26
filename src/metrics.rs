@@ -34,6 +34,8 @@ pub struct FnMetrics {
     pub is_test: bool,
     pub is_async: bool,
     pub is_unsafe: bool,
+    /// `extern "C" fn` or `#[no_mangle]`: the signature is an FFI contract.
+    pub is_extern: bool,
     /// True for trait methods and `impl Trait for T` methods, whose signature
     /// is dictated by the trait.
     pub is_trait_impl: bool,
@@ -88,6 +90,7 @@ impl FnCollector<'_, '_> {
             is_test: has_test_attr(attrs) || self.ctx.in_test(line),
             is_async: sig.asyncness.is_some(),
             is_unsafe: sig.unsafety.is_some(),
+            is_extern: sig.abi.is_some() || attrs.iter().any(|a| a.path().is_ident("no_mangle")),
             is_trait_impl: self.in_trait_impl,
         });
     }

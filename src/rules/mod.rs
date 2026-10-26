@@ -72,8 +72,10 @@ impl<'c, 'a> Sink<'c, 'a> {
 }
 
 mod complexity;
+mod concurrency;
 mod errors;
 mod panics;
+mod unsafe_code;
 
 #[cfg(test)]
 pub mod testing;
@@ -86,6 +88,13 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(panics::DbgMacro),
         Box::new(panics::PanicInDrop),
         Box::new(panics::ExitInLibrary),
+        Box::new(concurrency::LockAcrossAwait),
+        Box::new(concurrency::LockInScrutinee),
+        Box::new(concurrency::BlockingInAsync),
+        Box::new(unsafe_code::UndocumentedUnsafe),
+        Box::new(unsafe_code::UnboundedSendSync),
+        Box::new(unsafe_code::UninitMemory),
+        Box::new(unsafe_code::SetLenUninit),
         Box::new(errors::SwallowedError),
         Box::new(errors::UnusedIoAmount),
         Box::new(errors::UnitErrorType),

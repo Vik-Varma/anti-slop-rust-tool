@@ -68,6 +68,7 @@ dependencies = [
  "clap",
  "ignore",
  "proc-macro2",
+ "quote",
  "rayon",
  "serde",
  "serde_json",

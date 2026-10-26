@@ -14,7 +14,7 @@ pub struct Config {
     pub max_function_lines: usize,
     /// Nesting depth above which a function is flagged.
     pub max_nesting: usize,
-    /// Parameters above which a function is flagged (Clippy default: 7).
+    /// Parameters above which a function is flagged (Rice et al. 2017: more than 5 is defect-prone).
     pub max_params: usize,
     /// Minimum number of tokens for a duplicated code block to be reported.
     pub min_duplicate_tokens: usize,
@@ -34,7 +34,7 @@ impl Default for Config {
             max_cognitive_complexity: 25,
             max_function_lines: 100,
             max_nesting: 5,
-            max_params: 7,
+            max_params: 5,
             min_duplicate_tokens: 120,
             disable: Vec::new(),
             enable: Vec::new(),

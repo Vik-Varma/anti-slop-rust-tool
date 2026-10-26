@@ -20,14 +20,16 @@ static SWALLOWED: RuleMeta = RuleMeta {
     default_enabled: true,
     summary: "Error is silently discarded (`Err(_) => {}`, `result.ok();`)",
     rationale: "Yuan et al. (OSDI 2014) studied 198 user-reported failures in Cassandra, HBase, \
-HDFS, MapReduce and Redis: 92% of catastrophic failures resulted from incorrect handling of \
-errors that the software had explicitly signalled, and in 25% of those cases the error was \
-simply ignored (empty or log-only handler). An empty `Err` arm or a bare `.ok();` statement \
+HDFS, MapReduce and Redis: 92% of the catastrophic failures resulted from incorrect handling of \
+errors that the software had explicitly signalled, and 25% were caused by an error that was \
+simply ignored (empty or log-only handler). De Pádua & Shang (MSR 2018) found that empty \
+'dummy handlers' predicted post-release defects even after controlling for code size. An empty `Err` arm or a bare `.ok();` statement \
 throws the error away with no trace. Clippy `unused_result_ok`: 'Using Result::ok() may look like \
 the result is checked ... but it only silences the warning caused by #[must_use]'. Handle the \
 error, propagate it with `?`, or at least log it.",
     sources: &[
         "Yuan et al. Simple Testing Can Prevent Most Critical Failures. OSDI 2014. https://www.usenix.org/conference/osdi14/technical-sessions/presentation/yuan",
+        "de Pádua, Shang. Studying the relationship between exception handling practices and post-release defects. MSR 2018. doi:10.1145/3196398.3196435",
         "Gunawi et al. EIO: Error Handling is Occasionally Correct. FAST 2008.",
         "Clippy lint `unused_result_ok`.",
     ],

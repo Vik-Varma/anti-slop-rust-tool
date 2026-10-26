@@ -107,7 +107,7 @@ fn main() -> ExitCode {
                 if let Some(e) = &r.parse_error {
                     eprintln!("{}: parse error: {e}", r.file.display());
                 }
-                let kind = FileKind::from_path(&analyze::crate_relative(&r.file));
+                let kind = r.kind.unwrap_or(FileKind::Library);
                 for f in &r.functions {
                     let mut v = serde_json::to_value(f).expect("FnMetrics serialises");
                     v["file"] = serde_json::Value::String(r.file.display().to_string());

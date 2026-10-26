@@ -21,11 +21,13 @@ static TODO: RuleMeta = RuleMeta {
     severity: Severity::Error,
     evidence: Evidence::Strong,
     default_enabled: true,
-    summary: "`todo!()` / `unimplemented!()` reachable from production code",
-    rationale: "These macros mark unfinished code and panic unconditionally when reached. Clippy's \
+    summary: "`todo!()` in production code, or a function whose whole body is `unimplemented!()`",
+    rationale: "`todo!` marks unfinished code and panics unconditionally when reached. Clippy's \
 `todo` lint: 'The todo! macro indicates the presence of unfinished code, so it should not be \
-present in production code.' Unfinished stubs are also a hallmark of machine-generated code that \
-was never completed. Allowed in tests.",
+present in production code.' A function whose entire body is `unimplemented!()` is a stub. \
+`unimplemented!()` in a single match arm is not reported: the std docs note it makes no claim \
+that the code will be written and it commonly marks deliberately unsupported cases. Unfinished \
+stubs are also a hallmark of machine-generated code that was never completed. Allowed in tests.",
     sources: &[
         "Clippy lints `todo`, `unimplemented`.",
         "tests/demonstrations.rs::todo_panics_when_reached (this repository)",
@@ -271,7 +273,37 @@ impl Rule for TodoInProduction {
         &TODO
     }
     fn check(&self, input: &Input, sink: &mut Sink) {
-        MacroFinder { ctx: sink.ctx(), sink, names: &["todo", "unimplemented"] }.visit_file(&input.ctx.ast);
+        MacroFinder { ctx: sink.ctx(), sink, names: &["todo"] }.visit_file(&input.ctx.ast);
+        // Stub functions: the whole body is `unimplemented!(..)`.
+        struct Stubs<'s, 'c, 'a> {
+            sink: &'s mut Sink<'c, 'a>,
+            ctx: &'c FileContext<'a>,
+        }
+        impl Stubs<'_, '_, '_> {
+            fn body(&mut self, b: &syn::Block) {
+                let [stmt] = b.stmts.as_slice() else { return };
+                let mac = match stmt {
+                    syn::Stmt::Macro(m) => &m.mac,
+                    syn::Stmt::Expr(Expr::Macro(m), _) => &m.mac,
+                    _ => return,
+                };
+                let span = mac.path.span();
+                if macro_name(mac) == "unimplemented" && self.ctx.is_production_line(span.start().line) {
+                    self.sink.emit_span(span, "function body is only `unimplemented!()`: an unfinished stub");
+                }
+            }
+        }
+        impl<'ast> Visit<'ast> for Stubs<'_, '_, '_> {
+            fn visit_item_fn(&mut self, f: &'ast syn::ItemFn) {
+                self.body(&f.block);
+                visit::visit_item_fn(self, f);
+            }
+            fn visit_impl_item_fn(&mut self, f: &'ast syn::ImplItemFn) {
+                self.body(&f.block);
+                visit::visit_impl_item_fn(self, f);
+            }
+        }
+        Stubs { ctx: sink.ctx(), sink }.visit_file(&input.ctx.ast);
     }
 }
 
@@ -407,7 +439,7 @@ mod tests {
 
     #[test]
     fn todo_flagged_outside_tests() {
-        let src = "fn a() { todo!() }\nfn b() { unimplemented!(\"x\") }\n#[cfg(test)]\nmod t { fn c() { todo!() } }\n";
+        let src = "fn a() { todo!() }\nfn b() { unimplemented!(\"x\") }\n#[cfg(test)]\nmod t { fn c() { todo!() } }\nfn d(x: u8) { match x { 0 => {}, _ => unimplemented!() } }\n";
         assert_eq!(lines(&check_rule("todo-in-production", src)), vec![1, 2]);
         assert!(check_rule_at("todo-in-production", "tests/it.rs", src).is_empty());
         assert!(check_rule_at("todo-in-production", "examples/e.rs", src).is_empty());

@@ -11,4 +11,5 @@ pub mod duplicates;
 pub mod finding;
 pub mod lexer;
 pub mod metrics;
+pub mod modtree;
 pub mod rules;

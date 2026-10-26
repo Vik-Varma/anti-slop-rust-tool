@@ -75,11 +75,21 @@ fn is_empty_body(e: &Expr) -> bool {
     }
 }
 
+/// `Err(_)`, `Err(e)` or `Err(..)`: a pattern that catches any error. Arms
+/// matching one specific error variant are deliberate and not reported.
 fn is_err_pattern(p: &Pat) -> bool {
     match p {
-        Pat::TupleStruct(ts) => ts.path.segments.last().is_some_and(|s| s.ident == "Err"),
+        Pat::TupleStruct(ts) => {
+            ts.path.segments.last().is_some_and(|s| s.ident == "Err")
+                && ts.elems.iter().all(|e| matches!(e, Pat::Wild(_) | Pat::Ident(_) | Pat::Rest(_)))
+        }
         _ => false,
     }
+}
+
+/// Is there a comment between these lines (an explained empty handler)?
+fn has_comment_within(ctx: &FileContext, start: usize, end: usize) -> bool {
+    ctx.comments().iter().any(|c| c.line >= start && c.line <= end)
 }
 
 struct SwallowFinder<'s, 'c, 'a> {
@@ -97,7 +107,11 @@ impl SwallowFinder<'_, '_, '_> {
 
 impl<'ast> Visit<'ast> for SwallowFinder<'_, '_, '_> {
     fn visit_arm(&mut self, arm: &'ast syn::Arm) {
-        if is_err_pattern(&arm.pat) && arm.guard.is_none() && is_empty_body(&arm.body) {
+        if is_err_pattern(&arm.pat)
+            && arm.guard.is_none()
+            && is_empty_body(&arm.body)
+            && !has_comment_within(self.ctx, arm.pat.span().start().line, arm.body.span().end().line)
+        {
             self.report(arm.pat.span(), "`Err` arm discards the error without handling or logging it");
         }
         visit::visit_arm(self, arm);
@@ -105,7 +119,11 @@ impl<'ast> Visit<'ast> for SwallowFinder<'_, '_, '_> {
 
     fn visit_expr_if(&mut self, i: &'ast syn::ExprIf) {
         if let Expr::Let(l) = &*i.cond {
-            if is_err_pattern(&l.pat) && i.then_branch.stmts.is_empty() && i.else_branch.is_none() {
+            if is_err_pattern(&l.pat)
+                && i.then_branch.stmts.is_empty()
+                && i.else_branch.is_none()
+                && !has_comment_within(self.ctx, l.pat.span().start().line, i.then_branch.span().end().line)
+            {
                 self.report(l.pat.span(), "`if let Err(..)` with an empty body discards the error");
             }
         }
@@ -115,7 +133,10 @@ impl<'ast> Visit<'ast> for SwallowFinder<'_, '_, '_> {
     fn visit_stmt(&mut self, s: &'ast Stmt) {
         if let Stmt::Expr(e, Some(_)) = s {
             if let Expr::MethodCall(m) = peel(e) {
-                if m.method == "ok" && m.args.is_empty() {
+                // `write!(string, ..).ok()` cannot fail for `String` and is a common idiom.
+                let on_write_macro = matches!(peel(&m.receiver), Expr::Macro(mac)
+                    if matches!(crate::ast_util::macro_name(&mac.mac).as_str(), "write" | "writeln"));
+                if m.method == "ok" && m.args.is_empty() && !on_write_macro {
                     self.report(m.method.span(), "`.ok();` silences the Result without checking it");
                 }
             }
@@ -155,10 +176,36 @@ fn strip_propagation(mut e: &Expr) -> &Expr {
     }
 }
 
+/// Does the argument look like a byte buffer (`&buf`, `&mut buf[..]`, `b"..."`,
+/// `s.as_bytes()`)? Excludes builder calls like `OpenOptions::write(true)`.
+fn is_buffer_arg(e: &Expr) -> bool {
+    match peel(e) {
+        Expr::Reference(r) => match peel(&r.expr) {
+            Expr::Path(_) | Expr::Lit(_) => is_buffer_arg(&r.expr),
+            Expr::Index(_) | Expr::Array(_) | Expr::Repeat(_) => true,
+            Expr::Field(f) => matches!(&f.member, syn::Member::Named(n) if is_buffer_name(&n.to_string())),
+            _ => false,
+        },
+        Expr::Lit(l) => matches!(l.lit, syn::Lit::ByteStr(_)),
+        // A variable named like a buffer (`buf`, `data`, `bytes`, ...).
+        Expr::Path(p) => p.path.get_ident().is_some_and(|i| is_buffer_name(&i.to_string())),
+        Expr::MethodCall(m) => {
+            matches!(m.method.to_string().as_str(), "as_bytes" | "as_slice" | "as_mut_slice" | "as_mut" | "as_ref")
+        }
+        _ => false,
+    }
+}
+
+fn is_buffer_name(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    ["buf", "data", "bytes", "chunk", "slice", "payload", "dst", "out"].iter().any(|k| name.contains(k))
+}
+
 fn io_call(e: &Expr) -> Option<&syn::ExprMethodCall> {
     match strip_propagation(e) {
         Expr::MethodCall(m)
             if m.args.len() == 1
+                && is_buffer_arg(&m.args[0])
                 && matches!(m.method.to_string().as_str(), "read" | "write" | "read_vectored" | "write_vectored") =>
         {
             Some(m)
@@ -177,6 +224,9 @@ impl Rule for UnusedIoAmount {
         }
         impl Finder<'_, '_, '_> {
             fn flag(&mut self, m: &syn::ExprMethodCall) {
+                if !self.sink.ctx().is_production_line(m.method.span().start().line) {
+                    return;
+                }
                 let fix = if m.method.to_string().starts_with("read") { "read_exact" } else { "write_all" };
                 self.sink.emit_span(
                     m.method.span(),
@@ -300,6 +350,9 @@ fn a(f: &mut std::fs::File, buf: &mut [u8]) -> std::io::Result<()> {
     let n = f.read(buf)?;
     f.write_all(b"ok")?;
     lock.write().unwrap();
+    peer.write(&Message::Goodbye)?;
+    opts.write(true);
+    slot.get().write(MaybeUninit::new(v));
     Ok(())
 }
 "#;

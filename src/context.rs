@@ -6,7 +6,8 @@ use syn::visit::Visit;
 
 /// The role a file plays in a crate. Several rules only make sense for
 /// production code and stay quiet in tests, benches, examples and build scripts.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum FileKind {
     Library,
     Binary,
@@ -66,21 +67,14 @@ pub struct FileContext<'a> {
 
 impl<'a> FileContext<'a> {
     pub fn new(path: &'a Path, display_path: PathBuf, source: &'a str) -> syn::Result<Self> {
-        let kind_path = display_path.clone();
-        Self::with_kind_path(path, display_path, &kind_path, source)
+        let kind = FileKind::from_path(&display_path);
+        Self::with_kind(path, display_path, kind, source)
     }
 
-    /// Like [`FileContext::new`], but classifies the file by `kind_path`
-    /// (normally the path relative to the crate root).
-    pub fn with_kind_path(
-        path: &'a Path,
-        display_path: PathBuf,
-        kind_path: &Path,
-        source: &'a str,
-    ) -> syn::Result<Self> {
+    /// Like [`FileContext::new`], with an explicit file classification.
+    pub fn with_kind(path: &'a Path, display_path: PathBuf, kind: FileKind, source: &'a str) -> syn::Result<Self> {
         let ast = syn::parse_file(source)?;
         let lexed = lexer::lex(source);
-        let kind = FileKind::from_path(kind_path);
         let mut tests = TestRangeVisitor::default();
         tests.visit_file(&ast);
         let mut ctx = FileContext {

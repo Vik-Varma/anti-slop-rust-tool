@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::context::FileContext;
+use crate::context::{FileContext, FileKind};
 use crate::finding::Finding;
 use crate::metrics::{self, FnMetrics};
 use crate::rules::{Input, Rule, Sink};
@@ -13,6 +13,7 @@ pub struct FileReport {
     pub findings: Vec<Finding>,
     pub functions: Vec<FnMetrics>,
     pub parse_error: Option<String>,
+    pub kind: Option<FileKind>,
     #[serde(skip)]
     pub tokens: Vec<crate::duplicates::Tok>,
 }
@@ -61,12 +62,12 @@ pub fn crate_relative(path: &Path) -> PathBuf {
 pub fn analyze_source(
     path: &Path,
     display: PathBuf,
-    kind_path: &Path,
+    kind: FileKind,
     source: &str,
     config: &Config,
     rules: &[Box<dyn Rule>],
 ) -> FileReport {
-    let ctx = match FileContext::with_kind_path(path, display.clone(), kind_path, source) {
+    let ctx = match FileContext::with_kind(path, display.clone(), kind, source) {
         Ok(ctx) => ctx,
         Err(e) => {
             let loc = e.span().start();
@@ -94,16 +95,17 @@ pub fn analyze_source(
     } else {
         Vec::new()
     };
-    FileReport { file: display, findings, functions: fns, parse_error: None, tokens }
+    FileReport { file: display, findings, functions: fns, parse_error: None, kind: Some(kind), tokens }
 }
 
 pub fn analyze_files(files: &[PathBuf], config: &Config, rules: &[Box<dyn Rule>]) -> Vec<FileReport> {
+    let layout = crate::modtree::compute(files);
     let mut reports: Vec<FileReport> = files
         .par_iter()
         .map(|path| {
-            let kind_path = crate_relative(path);
+            let kind = layout.classify(path);
             match std::fs::read_to_string(path) {
-                Ok(src) => analyze_source(path, path.clone(), &kind_path, &src, config, rules),
+                Ok(src) => analyze_source(path, path.clone(), kind, &src, config, rules),
                 Err(e) => FileReport {
                     file: path.clone(),
                     parse_error: Some(format!("cannot read: {e}")),

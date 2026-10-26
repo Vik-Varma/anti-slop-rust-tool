@@ -44,7 +44,8 @@ static SEND_SYNC: RuleMeta = RuleMeta {
     default_enabled: true,
     summary: "`unsafe impl Send/Sync` for a generic type without `T: Send`/`T: Sync` bounds",
     rationale: "`unsafe impl<T> Send for Wrapper<T>` lets `Wrapper<Rc<_>>` or \
-`Wrapper<Cell<_>>` cross threads, causing data races in safe code. Xu et al. (TOSEM 2021) found \
+`Wrapper<Cell<_>>` cross threads, causing data races in safe code. For `Sync`, a `T: Send` bound \
+is accepted (as for `Mutex<T>`), since containers that only move values need no more. Xu et al. (TOSEM 2021) found \
 missing Send/Sync bounds to be the most common pattern among memory-safety bugs in all Rust CVEs \
 (30 of 185 bugs), and Rudra (Bae et al., SOSP 2021) found 178 such bugs in crates.io. Type \
 parameters used only inside `PhantomData` (when the type is defined in the same file) are not \
@@ -235,11 +236,18 @@ impl Rule for UnboundedSendSync {
                         }
                     }
                 }
+                // `Sync` for a container whose values are moved in and out (like
+                // `Mutex<T>` or a channel) only needs `T: Send`.
+                let accepted: &[&str] = if trait_name == "Send" { &["Send"] } else { &["Sync", "Send"] };
                 for p in params {
                     if !mentions_ident(&i.self_ty, &p) {
                         continue;
                     }
-                    let has = bounds.get(&p).is_some_and(|b| b.iter().any(|n| n == &trait_name));
+                    let has = bounds.get(&p).is_some_and(|b| b.iter().any(|n| accepted.contains(&n.as_str())))
+                        // A bound on an associated type (`T::Target: Send`) shows the author considered it.
+                        || bounds.iter().any(|(k, b)| {
+                            k.starts_with(&format!("{p} ::")) && b.iter().any(|n| accepted.contains(&n.as_str()))
+                        });
                     if has {
                         continue;
                     }
@@ -418,8 +426,11 @@ unsafe impl<T> Sync for W<T> where T: Sync {}
 struct P<T> { _m: std::marker::PhantomData<T>, raw: *mut u8 }
 unsafe impl<T> Send for P<T> {}
 unsafe impl<T: Send> Sync for W<T> {}
+unsafe impl<T> Sync for W<T> {}
+struct L<T>(T);
+unsafe impl<T: Link> Send for L<T> where T::Target: Send {}
 "#;
-        assert_eq!(lines(&check_rule("unbounded-send-sync", src)), vec![3, 8]);
+        assert_eq!(lines(&check_rule("unbounded-send-sync", src)), vec![3, 9]);
     }
 
     #[test]

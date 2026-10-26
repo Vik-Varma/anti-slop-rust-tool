@@ -479,9 +479,11 @@ impl<'ast> Visit<'ast> for Blocking<'_, '_, '_> {
             if let Some((instead, what)) = self.classify_call(&p.path) {
                 self.report(p.span(), &what, instead);
             }
-            let offload = p.path.segments.last().is_some_and(|s| OFFLOAD_FNS.iter().any(|n| s.ident == n));
+            // Closures handed to free functions (`spawn_blocking`, `thread::spawn`, or wrappers
+            // like tokio's `asyncify`) may run off the executor, so they are not inspected.
+            // Closures passed to methods (iterator adapters) run inline and are.
+            let offload = c.args.iter().any(|a| matches!(peel(a), Expr::Closure(_)));
             if offload {
-                // Closures handed to spawn_blocking / thread::spawn run off the executor.
                 let prev = self.in_async;
                 self.in_async = false;
                 for arg in &c.args {
@@ -625,11 +627,15 @@ async fn bad() {
 async fn offloaded() {
     tokio::task::spawn_blocking(|| std::thread::sleep(d)).await;
     std::thread::spawn(move || fs::read("x"));
+    asyncify(move || std::fs::remove_dir(p)).await;
+}
+async fn inline_closure(paths: Vec<String>) {
+    let v: Vec<_> = paths.iter().map(|p| std::fs::read(p)).collect();
 }
 fn sync() { thread::sleep(d); }
 async fn tokio_fs() { tokio::fs::read_to_string("x").await; tokio::time::sleep(d).await; }
 "#;
-        assert_eq!(lines(&check_rule("blocking-in-async", src)), vec![6, 7, 8, 9, 10]);
+        assert_eq!(lines(&check_rule("blocking-in-async", src)), vec![6, 7, 8, 9, 10, 18]);
     }
 
     #[test]

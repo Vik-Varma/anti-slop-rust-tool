@@ -71,10 +71,13 @@ impl<'c, 'a> Sink<'c, 'a> {
     }
 }
 
+mod comments;
 mod complexity;
 mod concurrency;
 mod errors;
+mod misc;
 mod panics;
+mod perf;
 mod unsafe_code;
 
 #[cfg(test)]
@@ -98,6 +101,18 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(errors::SwallowedError),
         Box::new(errors::UnusedIoAmount),
         Box::new(errors::UnitErrorType),
+        Box::new(misc::FloatEquality),
+        Box::new(misc::PtrArg),
+        Box::new(misc::DenyWarnings),
+        Box::new(perf::NeedlessCollect),
+        Box::new(perf::FormatPushString),
+        Box::new(perf::BorrowedClone),
+        Box::new(perf::RedundantBox),
+        Box::new(perf::EagerFallbackAlloc),
+        Box::new(comments::PlaceholderComment),
+        Box::new(comments::CommentedOutCode),
+        Box::new(comments::SatdComment),
+        Box::new(comments::RedundantComment),
         Box::new(complexity::CognitiveComplexity),
         Box::new(complexity::DeepNesting),
         Box::new(complexity::LongFunction),

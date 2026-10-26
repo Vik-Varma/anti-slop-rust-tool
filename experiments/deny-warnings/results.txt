@@ -1,0 +1,2 @@
+rust 1.76: builds
+rust 1.99: FAILS: error: creating a shared reference to mutable static

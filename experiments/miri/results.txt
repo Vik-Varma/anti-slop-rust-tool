@@ -1,0 +1,9 @@
+ok    bad_assume_init: ub
+      error: Undefined Behavior: constructing invalid value of type u32: encountered uninitialized memory, but expected an integer
+ok    bad_mem_uninitialized: ub
+      error: Undefined Behavior: constructing invalid value of type u32: encountered uninitialized memory, but expected an integer
+ok    bad_static_mut_race: ub
+      error: Undefined Behavior: Data race detected between (1) non-atomic write on thread `main` and (2) non-atomic read on thread `unnamed-1` at alloc1
+ok    good_atomic_counter: clean
+ok    good_uninit_array: clean
+(nightly: rustc 1.101.0-nightly (12433c307 2026-10-24))

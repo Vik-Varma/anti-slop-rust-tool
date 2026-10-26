@@ -113,6 +113,7 @@ impl<'ast> Visit<'ast> for SwallowFinder<'_, '_, '_> {
             && arm.guard.is_none()
             && is_empty_body(&arm.body)
             && !has_comment_within(self.ctx, arm.pat.span().start().line, arm.body.span().end().line)
+            && self.ctx.comments_above(arm.pat.span().start().line).is_empty()
         {
             self.report(arm.pat.span(), "`Err` arm discards the error without handling or logging it");
         }

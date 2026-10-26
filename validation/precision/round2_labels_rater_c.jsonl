@@ -1,0 +1,64 @@
+{"item": 1, "rule": "eager-fallback-alloc", "label": "TP", "reason": "\"UNKNOWN\".to_owned() allocated even when permission is Some."}
+{"item": 2, "rule": "eager-fallback-alloc", "label": "TP", "reason": "Default URL String allocated even when env var is set."}
+{"item": 3, "rule": "eager-fallback-alloc", "label": "TP", "reason": "Fallback eagerly computed (allocation plus an early-return `?`) even when name is Some."}
+{"item": 4, "rule": "eager-fallback-alloc", "label": "TP", "reason": "Fallback String allocated even when body reads successfully."}
+{"item": 5, "rule": "eager-fallback-alloc", "label": "TP", "reason": "target name allocated even when binary_filename is Some."}
+{"item": 6, "rule": "eager-fallback-alloc", "label": "TP", "reason": "String::from fallback allocated even when const value exists."}
+{"item": 7, "rule": "eager-fallback-alloc", "label": "TP", "reason": "format! error built even on successful parse."}
+{"item": 8, "rule": "eager-fallback-alloc", "label": "TP", "reason": "\"[ROOT]\".to_owned() allocated even when name exists."}
+{"item": 9, "rule": "exit-in-library", "label": "TP-intentional", "reason": "zellij root lib is the application itself (main.rs just calls zellij::run_zellij); CLI command handler exits deliberately."}
+{"item": 10, "rule": "exit-in-library", "label": "TP-intentional", "reason": "`run` is the documented whole-process entry point for distributions; exiting on startup failure is deliberate."}
+{"item": 11, "rule": "exit-in-library", "label": "TP", "reason": "zellij-client library crate exits the process from its client loop instead of returning an error."}
+{"item": 12, "rule": "exit-in-library", "label": "TP-intentional", "reason": "Function is documented as kill-jobs-and-exit with `-> !` return type; exiting is its purpose."}
+{"item": 13, "rule": "exit-in-library", "label": "TP-intentional", "reason": "Application CLI code in the zellij app lib; commented deliberate abort on nested session."}
+{"item": 14, "rule": "exit-in-library", "label": "TP-intentional", "reason": "Application CLI action command in zellij app lib that always ends the process."}
+{"item": 15, "rule": "exit-in-library", "label": "TP", "reason": "zellij-utils utility function delete_session exits instead of returning an error."}
+{"item": 16, "rule": "exit-in-library", "label": "TP-intentional", "reason": "Application CLI handler in zellij app lib exiting with a defined exit code."}
+{"item": 17, "rule": "format-push-string", "label": "TP", "reason": "msg += &format!(..) in a loop allocates a temporary."}
+{"item": 18, "rule": "format-push-string", "label": "TP", "reason": "push_str(&format!(..)) where writeln! is already used nearby."}
+{"item": 19, "rule": "format-push-string", "label": "TP", "reason": "push_str(&format!(..)) temporary allocation."}
+{"item": 20, "rule": "format-push-string", "label": "TP", "reason": "push_str(&format!(..)) temporary allocation."}
+{"item": 21, "rule": "format-push-string", "label": "TP", "reason": "push_str(&format!(..)) temporary allocation."}
+{"item": 22, "rule": "format-push-string", "label": "TP", "reason": "push_str(&format!(..)) temporary allocation."}
+{"item": 23, "rule": "format-push-string", "label": "TP", "reason": "push_str(&format!(..)) per byte in a loop."}
+{"item": 24, "rule": "format-push-string", "label": "TP", "reason": "push_str(&format!(..)) temporary allocation."}
+{"item": 25, "rule": "panic-in-drop", "label": "TP-intentional", "reason": "assert_eq! deliberately checks a drain invariant in drop."}
+{"item": 26, "rule": "panic-in-drop", "label": "TP-intentional", "reason": "Option fields always Some until drop; take().unwrap() is unreachable by construction."}
+{"item": 27, "rule": "panic-in-drop", "label": "TP-intentional", "reason": "Serializing HashMap<u64,..> of plain data to JSON cannot fail; unwrap unreachable in practice."}
+{"item": 28, "rule": "panic-in-drop", "label": "TP", "reason": "current_exe()/fs unwraps in profiler guard drop can panic (feature-gated dev profiler)."}
+{"item": 29, "rule": "panic-in-drop", "label": "TP-intentional", "reason": "try_into on a slice of exactly 3 bytes to [u8;3] is infallible by construction."}
+{"item": 30, "rule": "panic-in-drop", "label": "TP-intentional", "reason": "unreachable! guards an enum variant that LocalRuntime never constructs."}
+{"item": 31, "rule": "panic-in-drop", "label": "TP", "reason": "lock().unwrap() in Drop panics on a poisoned mutex, possibly during unwinding."}
+{"item": 32, "rule": "panic-in-drop", "label": "TP-intentional", "reason": "Deliberate, documented misuse guard: dropping SelectedOperation without completing must panic."}
+{"item": 33, "rule": "satd-comment", "label": "TP", "reason": "FIXME marker describing known incorrect scoping."}
+{"item": 34, "rule": "satd-comment", "label": "TP", "reason": "TODO marker for pending cleanup once a feature stabilizes."}
+{"item": 35, "rule": "satd-comment", "label": "TP", "reason": "TODO marker about double boxing."}
+{"item": 36, "rule": "satd-comment", "label": "TP", "reason": "TODO marker for unresolved cell-path behavior."}
+{"item": 37, "rule": "satd-comment", "label": "TP", "reason": "FIXME marker for missing parser recovery."}
+{"item": 38, "rule": "satd-comment", "label": "TP", "reason": "FIXME marker: errors not reported."}
+{"item": 39, "rule": "satd-comment", "label": "TP", "reason": "TODO marker about misplaced code."}
+{"item": 40, "rule": "satd-comment", "label": "TP", "reason": "FIXME marker: missing error emission."}
+{"item": 41, "rule": "swallowed-error", "label": "TP-intentional", "reason": "fmt::Write into a String cannot fail, so .ok() discards an impossible error."}
+{"item": 42, "rule": "swallowed-error", "label": "TP", "reason": "Parse errors of built-in themes silently dropped."}
+{"item": 43, "rule": "swallowed-error", "label": "TP", "reason": "set_nonblocking failure ignored; subsequent peek could block."}
+{"item": 44, "rule": "swallowed-error", "label": "TP-intentional", "reason": "Explicitly commented: ignore other errors like permission issues while scanning sockets."}
+{"item": 45, "rule": "swallowed-error", "label": "TP", "reason": "KillSession send failure silently ignored."}
+{"item": 46, "rule": "swallowed-error", "label": "TP", "reason": "show_cursor error silently discarded during terminal restore."}
+{"item": 47, "rule": "swallowed-error", "label": "TP", "reason": "Errors printing help via Controller::run are discarded."}
+{"item": 48, "rule": "swallowed-error", "label": "TP", "reason": "set_token failure ignored, token mapping could be wrong."}
+{"item": 49, "rule": "too-many-params", "label": "TP", "reason": "Free function with 6 parameters."}
+{"item": 50, "rule": "too-many-params", "label": "TP", "reason": "Constructor with 7 parameters."}
+{"item": 51, "rule": "too-many-params", "label": "TP", "reason": "Six same-typed usize parameters, easy to swap."}
+{"item": 52, "rule": "too-many-params", "label": "TP-intentional", "reason": "20 parameters but explicitly acknowledged with #[allow(clippy::too_many_arguments)]."}
+{"item": 53, "rule": "too-many-params", "label": "TP", "reason": "6 parameters counting &mut self (5 without self; borderline)."}
+{"item": 54, "rule": "too-many-params", "label": "TP-intentional", "reason": "9 parameters, explicitly allowed with #[allow(clippy::too_many_arguments)]."}
+{"item": 55, "rule": "too-many-params", "label": "TP", "reason": "async fn with 6 parameters."}
+{"item": 56, "rule": "too-many-params", "label": "TP", "reason": "Constructor with 10 parameters."}
+{"item": 57, "rule": "unwrap-in-result-fn", "label": "TP-intentional", "reason": "next() after a successful peek() that was already checked Ok; unwraps unreachable by construction."}
+{"item": 58, "rule": "unwrap-in-result-fn", "label": "TP", "reason": "capabilities.get().unwrap() panics if called before initialization; function returns Option."}
+{"item": 59, "rule": "unwrap-in-result-fn", "label": "TP-intentional", "reason": "KvWriter insert into Vec with in-order keys cannot fail; unwrap unreachable by construction."}
+{"item": 60, "rule": "unwrap-in-result-fn", "label": "TP-intentional", "reason": "Preceded by explicit is_none() bail! checks; unwrap is unreachable."}
+{"item": 61, "rule": "unwrap-in-result-fn", "label": "TP", "reason": "build_global() fails if a global pool already exists; function returns Result."}
+{"item": 62, "rule": "unwrap-in-result-fn", "label": "TP-intentional", "reason": "checked_add(1).unwrap() is a deliberate overflow assertion (start < end <= usize::MAX)."}
+{"item": 63, "rule": "unwrap-in-result-fn", "label": "TP", "reason": "Non-UTF-8 passwd fields would panic though function returns Result."}
+{"item": 64, "rule": "unwrap-in-result-fn", "label": "TP", "reason": "Decode/stdin failures panic in a function returning Result<_, String>."}

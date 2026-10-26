@@ -38,6 +38,11 @@ pub fn stmt(a: &mut Analyzer, node: &syn::Stmt) {
             Some(init) => (init.expr.as_ref(), "`let _ =`"),
             None => return,
         },
+        syn::Stmt::Expr(syn::Expr::Assign(asg), Some(_))
+            if matches!(peel(&asg.left), syn::Expr::Infer(_)) =>
+        {
+            (asg.right.as_ref(), "`_ =`")
+        }
         syn::Stmt::Expr(e, Some(_)) => match is_method(e, "ok", 0) {
             Some(m) => (&*m.receiver, "`.ok();`"),
             None => return,
@@ -54,7 +59,12 @@ pub fn stmt(a: &mut Analyzer, node: &syn::Stmt) {
 }
 
 fn persist_op(e: &syn::Expr) -> Option<String> {
-    match peel(e) {
+    // `f.write_all(b).await` on an async writer fails the same way.
+    let e = match peel(e) {
+        syn::Expr::Await(aw) => peel(&aw.base),
+        other => other,
+    };
+    match e {
         syn::Expr::MethodCall(m) if PERSIST_METHODS.contains(&m.method.to_string().as_str()) => {
             // A failed write to the terminal has nowhere to be reported; ignoring it is normal.
             if mentions_std_stream(&m.receiver) {

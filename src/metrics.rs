@@ -33,7 +33,10 @@ pub fn measure(
     lines: &[&str],
     test: bool,
 ) -> FunctionMetrics {
-    let mut c = Complexity::default();
+    let mut c = Complexity {
+        name: sig.ident.to_string(),
+        ..Complexity::default()
+    };
     c.visit_block(block);
     let params = sig
         .inputs
@@ -81,6 +84,8 @@ pub fn code_lines(lines: &[&str], start: usize, end: usize) -> usize {
 
 #[derive(Default)]
 struct Complexity {
+    /// The function's own name, to spot direct recursion (Campbell's B1 increment).
+    name: String,
     decisions: usize,
     cognitive: usize,
     nesting: usize,
@@ -213,6 +218,50 @@ impl<'ast> Visit<'ast> for Complexity {
         }
     }
 
+    // `let PAT = x else { .. };` is the same two-way branch as `if let PAT = x { .. } else { .. }`.
+    fn visit_local(&mut self, node: &'ast syn::Local) {
+        let Some(init) = &node.init else {
+            return visit::visit_local(self, node);
+        };
+        let Some((_, diverge)) = &init.diverge else {
+            return visit::visit_local(self, node);
+        };
+        self.decisions += 1;
+        self.cognitive += 1 + self.nesting;
+        self.visit_expr(&init.expr);
+        self.deeper(|c| c.visit_expr(diverge));
+    }
+
+    // Code inside `format!`, `assert!` and friends is code, as the analyzer treats it.
+    fn visit_macro(&mut self, node: &'ast syn::Macro) {
+        if let Some(args) = crate::checks::macro_args(node) {
+            for a in &args {
+                self.visit_expr(a);
+            }
+        }
+    }
+
+    // Campbell: +1 for each method in a recursion cycle. Only direct self-calls are visible here.
+    fn visit_expr_call(&mut self, node: &'ast syn::ExprCall) {
+        if let syn::Expr::Path(p) = node.func.as_ref()
+            && p.path.segments.last().is_some_and(|s| s.ident == self.name)
+            && (p.path.segments.len() == 1
+                || p.path.segments.first().is_some_and(|s| s.ident == "Self"))
+        {
+            self.cognitive += 1;
+        }
+        visit::visit_expr_call(self, node);
+    }
+
+    fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
+        if node.method == self.name
+            && matches!(node.receiver.as_ref(), syn::Expr::Path(p) if p.path.is_ident("self"))
+        {
+            self.cognitive += 1;
+        }
+        visit::visit_expr_method_call(self, node);
+    }
+
     // Nested items are measured on their own.
     fn visit_item(&mut self, _: &'ast syn::Item) {}
 }
@@ -281,6 +330,30 @@ mod tests {
         let m = metrics_of("fn f(x: i32) -> i32 { if x > 0 { 1 } else if x < 0 { 2 } else { 3 } }");
         assert_eq!(m.cognitive, 3);
         assert_eq!(m.cyclomatic, 3);
+    }
+
+    #[test]
+    fn let_else_counts_like_if_let() {
+        let a = metrics_of("fn f(x: Option<u8>) -> u8 { let Some(v) = x else { return 0 }; v }");
+        let b =
+            metrics_of("fn f(x: Option<u8>) -> u8 { if let Some(v) = x { v } else { return 0 } }");
+        assert_eq!(a.cyclomatic, b.cyclomatic);
+        assert_eq!(a.cyclomatic, 2);
+        assert!(a.cognitive >= 1);
+    }
+
+    #[test]
+    fn branches_inside_format_args_count() {
+        let m = metrics_of(
+            "fn f(x: u8) -> String { format!(\"{}\", if x > 3 && x < 9 { 1 } else { 2 }) }",
+        );
+        assert_eq!((m.cyclomatic, m.cognitive), (3, 3));
+    }
+
+    #[test]
+    fn direct_recursion_adds_one() {
+        let m = metrics_of("fn f(n: u64) -> u64 { n * f(n - 1) }");
+        assert_eq!(m.cognitive, 1);
     }
 
     #[test]

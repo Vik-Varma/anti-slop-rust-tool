@@ -24,6 +24,36 @@ OPTIONS:
 
 Silence one finding with `// anti-slop: allow(RULE) reason` on its line or the line above.";
 
+/// Why the CLI stopped: a usage mistake (print the usage), or an I/O failure (just say so).
+enum Error {
+    Usage(String),
+    Io(io::Error),
+}
+
+impl From<io::Error> for Error {
+    fn from(e: io::Error) -> Error {
+        Error::Io(e)
+    }
+}
+
+impl From<String> for Error {
+    fn from(msg: String) -> Error {
+        Error::Usage(msg)
+    }
+}
+
+impl From<&str> for Error {
+    fn from(msg: &str) -> Error {
+        Error::Usage(msg.to_string())
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Command {
+    Check,
+    Metrics,
+}
+
 struct Options {
     format: String,
     min_severity: Severity,
@@ -32,9 +62,14 @@ struct Options {
     paths: Vec<PathBuf>,
 }
 
-fn parse_options(args: &[String]) -> Result<Options, String> {
+fn parse_options(command: Command, args: &[String]) -> Result<Options, Error> {
     let mut o = Options {
-        format: "text".into(),
+        format: if command == Command::Check {
+            "text"
+        } else {
+            "csv"
+        }
+        .into(),
         min_severity: Severity::Warning,
         only: vec![],
         skip: vec![],
@@ -51,15 +86,34 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
             }
             "--only" => o.only.extend(value("--only")?.split(',').map(String::from)),
             "--skip" => o.skip.extend(value("--skip")?.split(',').map(String::from)),
-            "-h" | "--help" => return Err(String::new()),
-            flag if flag.starts_with("--") => return Err(format!("unknown option `{flag}`")),
+            flag if flag.starts_with("--") => return Err(format!("unknown option `{flag}`").into()),
             path => o.paths.push(PathBuf::from(path)),
         }
     }
     for id in o.only.iter().chain(&o.skip) {
         if rules::get(id).is_none() {
-            return Err(format!("unknown rule `{id}`; `anti-slop rules` lists them"));
+            return Err(format!("unknown rule `{id}`; `anti-slop rules` lists them").into());
         }
+    }
+    let formats: &[&str] = if command == Command::Check {
+        &["text", "json"]
+    } else {
+        &["csv", "json"]
+    };
+    if !formats.contains(&o.format.as_str()) {
+        return Err(format!(
+            "unknown format `{}`; use {}",
+            o.format,
+            formats.join(" or ")
+        )
+        .into());
+    }
+    if command == Command::Metrics
+        && (!o.only.is_empty() || !o.skip.is_empty() || o.min_severity != Severity::Warning)
+    {
+        return Err(
+            "`metrics` reports every rule; --only, --skip and --min-severity don't apply".into(),
+        );
     }
     if o.paths.is_empty() {
         return Err("give at least one file or directory".into());
@@ -69,17 +123,27 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|a| a == "-h" || a == "--help") {
+        println!("{USAGE}");
+        return ExitCode::SUCCESS;
+    }
     let result = match args.first().map(String::as_str) {
         Some("rules") => list_rules(),
         Some("explain") => explain(args.get(1)),
-        Some("metrics") => parse_options(&args[1..]).and_then(|o| metrics(&o)),
-        Some("check") => parse_options(&args[1..]).and_then(|o| check(&o)),
-        Some(_) => parse_options(&args).and_then(|o| check(&o)),
-        None => Err(String::new()),
+        Some("metrics") => parse_options(Command::Metrics, &args[1..]).and_then(|o| metrics(&o)),
+        Some("check") => parse_options(Command::Check, &args[1..]).and_then(|o| check(&o)),
+        Some(_) => parse_options(Command::Check, &args).and_then(|o| check(&o)),
+        None => Err(Error::Usage(String::new())),
     };
     match result {
         Ok(code) => code,
-        Err(msg) => {
+        // The reader went away (`anti-slop . | head`): nothing more to say.
+        Err(Error::Io(e)) if e.kind() == io::ErrorKind::BrokenPipe => ExitCode::SUCCESS,
+        Err(Error::Io(e)) => {
+            eprintln!("anti-slop: {e}");
+            ExitCode::from(2)
+        }
+        Err(Error::Usage(msg)) => {
             if !msg.is_empty() {
                 eprintln!("anti-slop: {msg}\n");
             }
@@ -89,7 +153,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn list_rules() -> Result<ExitCode, String> {
+fn list_rules() -> Result<ExitCode, Error> {
     let mut out = io::stdout().lock();
     for r in rules::all() {
         writeln!(
@@ -99,13 +163,12 @@ fn list_rules() -> Result<ExitCode, String> {
             r.severity,
             r.category.as_str(),
             r.summary
-        )
-        .map_err(|e| e.to_string())?;
+        )?;
     }
     Ok(ExitCode::SUCCESS)
 }
 
-fn explain(id: Option<&String>) -> Result<ExitCode, String> {
+fn explain(id: Option<&String>) -> Result<ExitCode, Error> {
     let id = id.ok_or("explain needs a rule id")?;
     let r = rules::get(id).ok_or(format!("unknown rule `{id}`"))?;
     let mut text = format!(
@@ -122,7 +185,7 @@ fn explain(id: Option<&String>) -> Result<ExitCode, String> {
     for s in r.sources {
         text.push_str(&format!("  - {s}\n"));
     }
-    print!("{text}");
+    io::stdout().lock().write_all(text.as_bytes())?;
     Ok(ExitCode::SUCCESS)
 }
 
@@ -132,7 +195,7 @@ fn keep(o: &Options, f: &Finding) -> bool {
         && !o.skip.iter().any(|r| r == f.rule)
 }
 
-fn check(o: &Options) -> Result<ExitCode, String> {
+fn check(o: &Options) -> Result<ExitCode, Error> {
     let (reports, errors) = analyze_paths(&o.paths);
     let findings: Vec<&Finding> = reports
         .iter()
@@ -140,12 +203,11 @@ fn check(o: &Options) -> Result<ExitCode, String> {
         .filter(|f| keep(o, f))
         .collect();
     let mut out = io::stdout().lock();
-    let written = match o.format.as_str() {
-        "text" => write_text(&mut out, &findings, reports.len()),
-        "json" => write_json(&mut out, &findings),
-        other => return Err(format!("unknown format `{other}`")),
-    };
-    written.map_err(|e| e.to_string())?;
+    if o.format == "json" {
+        write_json(&mut out, &findings)?;
+    } else {
+        write_text(&mut out, &findings, reports.len())?;
+    }
     for e in &errors {
         eprintln!("anti-slop: {e}");
     }
@@ -169,6 +231,11 @@ fn write_text(out: &mut impl Write, findings: &[&Finding], files: usize) -> io::
         writeln!(out, "  {n:>5}  {rule}")?;
     }
     Ok(())
+}
+
+/// RFC 4180: quote the field and double any quote inside it.
+fn csv_str(s: &str) -> String {
+    format!("\"{}\"", s.replace('"', "\"\""))
 }
 
 pub fn json_str(s: &str) -> String {
@@ -214,13 +281,18 @@ fn write_json(out: &mut impl Write, findings: &[&Finding]) -> io::Result<()> {
 }
 
 /// One row per function: its metrics, the candidate-pattern counts and the findings inside it.
-fn function_rows(path: &str, report: &anti_slop::FileReport) -> Vec<Vec<(String, String)>> {
+/// Text fields are quoted for the output format; numbers are left bare.
+fn function_rows(
+    path: &str,
+    report: &anti_slop::FileReport,
+    quote: fn(&str) -> String,
+) -> Vec<Vec<(String, String)>> {
     let mut rows = Vec::new();
-    for m in &report.functions {
+    for (index, m) in report.functions.iter().enumerate() {
         let f = &m.features;
         let mut row: Vec<(String, String)> = vec![
-            ("path".into(), json_str(path)),
-            ("function".into(), json_str(&m.name)),
+            ("path".into(), quote(path)),
+            ("function".into(), quote(&m.name)),
         ];
         let numbers = [
             ("start", m.start_line),
@@ -244,10 +316,11 @@ fn function_rows(path: &str, report: &anti_slop::FileReport) -> Vec<Vec<(String,
         ];
         row.extend(numbers.iter().map(|(k, v)| (k.to_string(), v.to_string())));
         for r in rules::all() {
+            // By the function the finding was emitted in, so nested functions don't count twice.
             let n = report
                 .findings
                 .iter()
-                .filter(|x| x.rule == r.id && x.line >= m.start_line && x.line <= m.end_line)
+                .filter(|x| x.rule == r.id && x.function_index == Some(index))
                 .count();
             row.push((r.id.to_string(), n.to_string()));
         }
@@ -256,7 +329,7 @@ fn function_rows(path: &str, report: &anti_slop::FileReport) -> Vec<Vec<(String,
     rows
 }
 
-fn metrics(o: &Options) -> Result<ExitCode, String> {
+fn metrics(o: &Options) -> Result<ExitCode, Error> {
     let (reports, errors) = analyze_paths(&o.paths);
     let csv = o.format != "json";
     let mut out = io::stdout().lock();
@@ -266,7 +339,8 @@ fn metrics(o: &Options) -> Result<ExitCode, String> {
             writeln!(out, "[")?;
         }
         for (path, report) in &reports {
-            for row in function_rows(&path.to_string_lossy(), report) {
+            let quote = if csv { csv_str } else { json_str };
+            for row in function_rows(&path.to_string_lossy(), report, quote) {
                 if csv {
                     if first {
                         let names: Vec<&str> = row.iter().map(|(k, _)| k.as_str()).collect();
@@ -294,7 +368,7 @@ fn metrics(o: &Options) -> Result<ExitCode, String> {
         }
         Ok(())
     };
-    write_all().map_err(|e| e.to_string())?;
+    write_all()?;
     for e in &errors {
         eprintln!("anti-slop: {e}");
     }

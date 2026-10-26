@@ -27,6 +27,8 @@ pub fn async_block(a: &mut Analyzer, block: &syn::Block) {
     concurrency::async_body(a, block);
 }
 
+pub use unsafety::is_maybe_uninit_array;
+
 pub fn item_impl(a: &mut Analyzer, node: &syn::ItemImpl) {
     unsafety::unsafe_impl(a, node);
 }
@@ -110,18 +112,38 @@ pub fn macro_args(mac: &syn::Macro) -> Option<Punctuated<syn::Expr, syn::Token![
         })
 }
 
-/// For `if !thread::panicking()`, `Some(true)`: the then-branch runs only when not unwinding.
-/// For `if thread::panicking()` (or a bare `panicking()` imported from `std::thread`),
-/// `Some(false)`: the else-branch does.
+fn is_panicking_call(e: &syn::Expr) -> bool {
+    matches!(peel(e), syn::Expr::Call(c) if call_path(c).is_some_and(|p| path_ends_with(p, &["panicking"])))
+}
+
+/// For `if !thread::panicking()` (alone, or as one operand of `&&`), `Some(true)`: the
+/// then-branch runs only when not unwinding. For `if thread::panicking()` (or a bare
+/// `panicking()` imported from `std::thread`), `Some(false)`: the else-branch does.
 pub fn panicking_guard(cond: &syn::Expr) -> Option<bool> {
-    let is_panicking_call = |e: &syn::Expr| matches!(peel(e), syn::Expr::Call(c) if call_path(c).is_some_and(|p| path_ends_with(p, &["panicking"])));
     match peel(cond) {
         syn::Expr::Unary(u) if matches!(u.op, syn::UnOp::Not(_)) && is_panicking_call(&u.expr) => {
             Some(true)
         }
+        syn::Expr::Binary(b) if matches!(b.op, syn::BinOp::And(_)) => {
+            (panicking_guard(&b.left) == Some(true) || panicking_guard(&b.right) == Some(true))
+                .then_some(true)
+        }
         e if is_panicking_call(e) => Some(false),
         _ => None,
     }
+}
+
+/// `if thread::panicking() { return; }`: everything after it runs only when not unwinding.
+pub fn returns_if_panicking(stmt: &syn::Stmt) -> bool {
+    let syn::Stmt::Expr(syn::Expr::If(i), _) = stmt else {
+        return false;
+    };
+    i.else_branch.is_none()
+        && panicking_guard(&i.cond) == Some(false)
+        && i.then_branch
+            .stmts
+            .last()
+            .is_some_and(|s| matches!(s, syn::Stmt::Expr(syn::Expr::Return(_), _)))
 }
 
 pub fn macro_name(mac: &syn::Macro) -> String {

@@ -46,22 +46,23 @@ pub fn exactly_representable(digits: &str, mantissa_bits: u32) -> Option<bool> {
         None => (lower.as_str(), 0),
     };
     let (int, frac) = number.split_once('.').unwrap_or((number, ""));
-    let mut m: u128 = format!("{int}{frac}")
-        .trim_start_matches('0')
-        .parse()
-        .unwrap_or(0);
-    let mut e10 = exp - i32::try_from(frac.len()).ok()?;
-    if m == 0 {
+    let frac = frac.trim_end_matches('0');
+    let digits = format!("{int}{frac}");
+    let digits = digits.trim_start_matches('0');
+    if digits.is_empty() {
         return Some(true);
     }
+    // Too many significant digits to decide here: say so rather than guess "exact".
+    let mut m: u128 = digits.parse().ok()?;
+    let mut e10 = exp.checked_sub(i32::try_from(frac.len()).ok()?)?;
     while m % 10 == 0 {
         m /= 10;
-        e10 += 1;
+        e10 = e10.checked_add(1)?;
     }
     let mut odd = if e10 >= 0 {
         m.checked_mul(10u128.checked_pow(u32::try_from(e10).ok()?)?)?
     } else {
-        let five = 5u128.checked_pow(u32::try_from(-e10).ok()?)?;
+        let five = 5u128.checked_pow(u32::try_from(-i64::from(e10)).ok()?)?;
         if m % five != 0 {
             return Some(false);
         }
@@ -112,6 +113,20 @@ mod tests {
         assert_eq!(exact("2.5e10", 53), Some(true));
         assert_eq!(exact("1e-3", 53), Some(false));
         assert_eq!(exact("0.375", 24), Some(true));
+    }
+
+    #[test]
+    fn undecidable_literals_are_none_not_exact() {
+        assert_eq!(
+            exact("0.100000000000000000000000000000000000000001", 53),
+            None
+        );
+        assert_eq!(exact("1.5e-2147483648", 53), None);
+        assert_eq!(exact("10e2147483647", 53), None);
+        assert_eq!(
+            exact("0.50000000000000000000000000000000000000000", 53),
+            Some(true)
+        );
     }
 
     #[test]

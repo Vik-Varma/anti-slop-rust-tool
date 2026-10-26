@@ -79,7 +79,7 @@ static RULES: &[Rule] = &[
         id: "panic-on-input",
         category: Category::Correctness,
         severity: Severity::Note,
-        summary: "`.unwrap()`/`.expect()` on parsing, decoding, file, env or socket results",
+        summary: "`.unwrap()` on parsing, decoding, file, env or socket results (`.expect(\"why\")` states a check and isn't flagged)",
         harm: "These fail because of something outside the program: a malformed file, a missing \
                variable, a non-UTF-8 path, a refused connection. Unwrapping turns that into a crash \
                instead of an error the caller can report. Cloudflare's 18 November 2025 outage was an \
@@ -155,7 +155,7 @@ static RULES: &[Rule] = &[
         id: "panic-in-drop",
         category: Category::Correctness,
         severity: Severity::Note,
-        summary: "A panic (`unwrap`, `expect`, `panic!`, `assert!`) inside `Drop::drop`",
+        summary: "`unwrap`, `expect`, `panic!` or `unreachable!` inside `Drop::drop`, unless guarded by `thread::panicking()`",
         harm: "Destructors run during unwinding. A panic in one while another panic unwinds aborts the whole \
                process: `catch_unwind` never gets control and no other destructor runs. Verified: SIGABRT \
                with \"panic in a destructor during cleanup\".",

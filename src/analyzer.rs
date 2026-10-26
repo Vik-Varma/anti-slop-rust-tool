@@ -35,11 +35,13 @@ pub fn analyze_source_as(
     let source = &blank_frontmatter(source);
     let file = syn::parse_file(source)?;
     let lines: Vec<&str> = source.lines().collect();
+    let comments = crate::comments::lines(source);
     let mut analyzer = Analyzer {
         path: path.to_path_buf(),
         kind,
         lines: &lines,
-        suppressions: Suppressions::parse(&lines),
+        suppressions: Suppressions::parse(&comments),
+        comments: &comments,
         scopes: vec![Scope {
             test: !kind.ships(),
             ..Scope::default()
@@ -60,37 +62,51 @@ pub fn analyze_source_as(
 }
 
 /// Cargo scripts open with a `---` manifest block that `syn` doesn't parse. Blanks it, line for
-/// line, so every reported line number still matches the file.
-fn blank_frontmatter(source: &str) -> std::borrow::Cow<'_, str> {
-    let mut lines: Vec<&str> = source.split('\n').collect();
-    let first = usize::from(
+/// line, so every reported line number still matches the file. Follows the frontmatter syntax: an
+/// optional shebang, then blank lines, then an opening fence of three or more dashes (with an
+/// optional infostring), closed by a line of the same number of dashes.
+pub(crate) fn blank_frontmatter(source: &str) -> std::borrow::Cow<'_, str> {
+    let body = source.strip_prefix('\u{feff}').unwrap_or(source);
+    let bom = source.len() - body.len();
+    let mut lines: Vec<&str> = body.split('\n').collect();
+    let mut first = usize::from(
         lines
             .first()
             .is_some_and(|l| l.starts_with("#!") && !l.starts_with("#![")),
     );
+    while lines.get(first).is_some_and(|l| l.trim().is_empty()) {
+        first += 1;
+    }
     let Some(open) = lines.get(first) else {
         return source.into();
     };
-    if !open.starts_with("---") {
+    let dashes = open.chars().take_while(|c| *c == '-').count();
+    if dashes < 3 {
         return source.into();
     }
+    let fence = &open[..dashes];
     let Some(close) = lines
         .iter()
         .skip(first + 1)
-        .position(|l| l.trim_end() == "---")
+        .position(|l| l.trim_end() == fence)
     else {
         return source.into();
     };
     for line in &mut lines[first..=first + 1 + close] {
         *line = "";
     }
-    lines.join("\n").into()
+    let mut out = String::with_capacity(source.len());
+    out.push_str(&source[..bom]);
+    out.push_str(&lines.join("\n"));
+    out.into()
 }
 
 pub struct Analyzer<'a> {
     pub path: PathBuf,
     pub kind: FileKind,
     pub lines: &'a [&'a str],
+    /// The comments on each line, from `crate::comments`.
+    pub comments: &'a [crate::comments::Line],
     suppressions: Suppressions,
     scopes: Vec<Scope>,
     self_types: Vec<String>,
@@ -125,6 +141,7 @@ impl Analyzer<'_> {
             column: start.column + 1,
             message: message.into(),
             function: self.scope().function.clone(),
+            function_index: self.scope().function_index,
         });
     }
 
@@ -144,23 +161,30 @@ impl Analyzer<'_> {
             test: parent.test || is_test_item(attrs),
             in_async: sig.asyncness.is_some(),
             in_drop: false,
-            in_const: sig.constness.is_some(),
+            // A `const fn` called at run time is ordinary code, so its panics are real.
+            in_const: false,
+            uninit_array_target: false,
             returns_result: returns_result(&sig.output),
             function: Some(name),
+            function_index: None,
         }
     }
 
-    fn visit_function(&mut self, sig: &syn::Signature, block: &syn::Block, scope: Scope) {
+    fn visit_function(&mut self, sig: &syn::Signature, block: &syn::Block, mut scope: Scope) {
         let start = sig.span().start().line;
         let end = block.span().end().line;
         let test = scope.test;
         let name = scope.function.clone().unwrap_or_default();
         let m = metrics::measure(name, sig, block, start, end, self.lines, test);
+        scope.function_index = Some(self.report.functions.len());
         self.report.functions.push(m);
+        // A `fn` nested in a method belongs to no impl.
+        let outer_types = std::mem::take(&mut self.self_types);
         self.with_scope(scope, |a| {
             checks::function(a, sig, block);
             a.visit_block(block);
         });
+        self.self_types = outer_types;
     }
 }
 
@@ -219,6 +243,14 @@ fn type_name(ty: &syn::Type) -> String {
             .map(|s| s.ident.to_string())
             .unwrap_or_default(),
         syn::Type::Reference(r) => type_name(&r.elem),
+        syn::Type::TraitObject(t) => {
+            let bounds: Vec<String> = t
+                .bounds
+                .iter()
+                .map(|b| quote::quote!(#b).to_string().replace(' ', ""))
+                .collect();
+            format!("dyn {}", bounds.join(" + "))
+        }
         other => quote::quote!(#other).to_string().replace(' ', ""),
     }
 }
@@ -267,8 +299,38 @@ impl<'ast> Visit<'ast> for Analyzer<'_> {
 
     fn visit_item_trait(&mut self, node: &'ast syn::ItemTrait) {
         self.self_types.push(node.ident.to_string());
-        visit::visit_item_trait(self, node);
+        let parent = self.scope().clone();
+        let scope = Scope {
+            test: parent.test || is_test_item(&node.attrs),
+            ..parent
+        };
+        self.with_scope(scope, |a| visit::visit_item_trait(a, node));
         self.self_types.pop();
+    }
+
+    // Associated and inline consts are evaluated at compile time, where a panic is a build error.
+    fn visit_impl_item_const(&mut self, node: &'ast syn::ImplItemConst) {
+        let scope = Scope {
+            in_const: true,
+            ..self.scope().clone()
+        };
+        self.with_scope(scope, |a| visit::visit_impl_item_const(a, node));
+    }
+
+    fn visit_trait_item_const(&mut self, node: &'ast syn::TraitItemConst) {
+        let scope = Scope {
+            in_const: true,
+            ..self.scope().clone()
+        };
+        self.with_scope(scope, |a| visit::visit_trait_item_const(a, node));
+    }
+
+    fn visit_expr_const(&mut self, node: &'ast syn::ExprConst) {
+        let scope = Scope {
+            in_const: true,
+            ..self.scope().clone()
+        };
+        self.with_scope(scope, |a| visit::visit_expr_const(a, node));
     }
 
     fn visit_trait_item_fn(&mut self, node: &'ast syn::TraitItemFn) {
@@ -298,6 +360,7 @@ impl<'ast> Visit<'ast> for Analyzer<'_> {
     fn visit_expr_async(&mut self, node: &'ast syn::ExprAsync) {
         let scope = Scope {
             in_async: true,
+            in_const: false,
             returns_result: false,
             ..self.scope().clone()
         };
@@ -309,12 +372,22 @@ impl<'ast> Visit<'ast> for Analyzer<'_> {
 
     fn visit_expr_closure(&mut self, node: &'ast syn::ExprClosure) {
         // A sync closure inside async code runs wherever it's called, often `spawn_blocking`.
+        // A closure runs when it is called, at run time, even inside a `static` initialiser
+        // (`LazyLock::new(|| ..)`).
         let scope = Scope {
             in_async: node.asyncness.is_some(),
+            in_const: false,
             returns_result: returns_result(&node.output),
             ..self.scope().clone()
         };
-        self.with_scope(scope, |a| visit::visit_expr_closure(a, node));
+        self.with_scope(scope, |a| {
+            if node.asyncness.is_some()
+                && let syn::Expr::Block(b) = node.body.as_ref()
+            {
+                checks::async_block(a, &b.block);
+            }
+            visit::visit_expr_closure(a, node)
+        });
     }
 
     fn visit_expr_if(&mut self, node: &'ast syn::ExprIf) {
@@ -341,6 +414,39 @@ impl<'ast> Visit<'ast> for Analyzer<'_> {
             return;
         }
         visit::visit_expr_if(self, node);
+    }
+
+    fn visit_block(&mut self, node: &'ast syn::Block) {
+        if !self.scope().in_drop {
+            return visit::visit_block(self, node);
+        }
+        // `if thread::panicking() { return; }` makes the rest of the destructor safe to panic in.
+        let mut guarded = false;
+        for stmt in &node.stmts {
+            if guarded {
+                let scope = Scope {
+                    in_drop: false,
+                    ..self.scope().clone()
+                };
+                self.with_scope(scope, |a| a.visit_stmt(stmt));
+                continue;
+            }
+            self.visit_stmt(stmt);
+            guarded = checks::returns_if_panicking(stmt);
+        }
+    }
+
+    fn visit_local(&mut self, node: &'ast syn::Local) {
+        if let syn::Pat::Type(t) = &node.pat
+            && checks::is_maybe_uninit_array(&t.ty)
+        {
+            let scope = Scope {
+                uninit_array_target: true,
+                ..self.scope().clone()
+            };
+            return self.with_scope(scope, |a| visit::visit_local(a, node));
+        }
+        visit::visit_local(self, node);
     }
 
     fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {

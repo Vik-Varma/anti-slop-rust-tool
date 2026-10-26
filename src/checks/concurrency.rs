@@ -41,7 +41,9 @@ fn scan_block(block: &syn::Block, hits: &mut Vec<(String, String, Span)>) {
             && let Some(name) = bound_ident(&local.pat)
         {
             for later in &block.stmts[i + 1..] {
-                if drops(later, &name) || rebinds(later, &name) {
+                // Shadowing (`let g = *g;`) hides the name but doesn't drop the guard, so only an
+                // explicit `drop(g)` ends it.
+                if drops(later, &name) {
                     break;
                 }
                 if let Some(at) = first_await(later) {
@@ -112,10 +114,6 @@ fn drops(stmt: &syn::Stmt, name: &str) -> bool {
         && c.args
             .iter()
             .any(|arg| matches!(peel(arg), syn::Expr::Path(p) if p.path.is_ident(name)))
-}
-
-fn rebinds(stmt: &syn::Stmt, name: &str) -> bool {
-    matches!(stmt, syn::Stmt::Local(l) if bound_ident(&l.pat).as_deref() == Some(name))
 }
 
 fn first_await(stmt: &syn::Stmt) -> Option<Span> {

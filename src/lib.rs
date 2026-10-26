@@ -7,6 +7,7 @@
 
 mod analyzer;
 mod checks;
+mod comments;
 mod context;
 mod features;
 mod finding;

@@ -83,10 +83,16 @@ pub struct Scope {
     pub in_async: bool,
     /// Inside `impl Drop for T { fn drop }`.
     pub in_drop: bool,
-    /// Inside a `const fn` or a `const`/`static` initialiser, where a panic is a compile error.
+    /// Evaluated at compile time (a `const`/`static` initialiser, an associated or inline `const`),
+    /// where a panic is a build error. Closures and `const fn` bodies run at run time and aren't.
     pub in_const: bool,
+    /// Inside the initialiser of `let x: [MaybeUninit<T>; N] = ..`, where `uninit().assume_init()`
+    /// is the documented sound way to make the array.
+    pub uninit_array_target: bool,
     /// The enclosing function returns a `Result`, so an error could have been propagated with `?`.
     pub returns_result: bool,
     /// The enclosing function's display name.
     pub function: Option<String>,
+    /// The enclosing function's position in the file's metrics, so findings count once.
+    pub function_index: Option<usize>,
 }

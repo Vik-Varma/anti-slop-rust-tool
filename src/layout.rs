@@ -2,27 +2,24 @@
 //! everything under `unit/`) test code, and every module of a crate with a `main.rs` but no `lib.rs`
 //! belongs to a binary. This resolves both from the file tree, without running Cargo.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::analyzer::{blank_frontmatter, is_test_item};
 use crate::context::FileKind;
 
 /// The kind of each file in `files`, found under `root`, using the crate layout where it says more
 /// than the path. Paths are judged relative to `root`, so a checkout that happens to live in a
 /// directory called `tests` isn't all test code.
 pub fn kinds(root: &Path, files: &[PathBuf]) -> HashMap<PathBuf, FileKind> {
-    let test_roots = test_modules(files);
+    let tests = test_modules(files);
     let mut bin_crates: HashMap<PathBuf, bool> = HashMap::new();
     files
         .iter()
         .map(|f| {
             let mut kind = FileKind::of(f.strip_prefix(root).unwrap_or(f));
-            if kind.ships()
-                && test_roots
-                    .iter()
-                    .any(|t| f == t || f.starts_with(t.with_extension("")))
-            {
+            if kind.ships() && tests.iter().any(|t| t.covers(f)) {
                 kind = FileKind::Test;
             } else if kind == FileKind::Library && in_binary_crate(f, &mut bin_crates) {
                 kind = FileKind::Binary;
@@ -32,96 +29,124 @@ pub fn kinds(root: &Path, files: &[PathBuf]) -> HashMap<PathBuf, FileKind> {
         .collect()
 }
 
-/// Files declared as `#[cfg(test)] mod name;` by another file in the set.
-fn test_modules(files: &[PathBuf]) -> HashSet<PathBuf> {
-    let mut out = HashSet::new();
-    for file in files {
-        let Ok(src) = fs::read_to_string(file) else {
-            continue;
+/// A module declared only for tests: its own file, and the directory its submodules live in.
+#[derive(Debug, PartialEq)]
+struct TestModule {
+    file: PathBuf,
+    dir: PathBuf,
+}
+
+impl TestModule {
+    fn at(file: PathBuf) -> TestModule {
+        // `x/mod.rs` keeps its submodules in `x/`; `x.rs` keeps them in `x/` too.
+        let dir = if file.file_name().is_some_and(|n| n == "mod.rs") {
+            file.parent().map(Path::to_path_buf).unwrap_or_default()
+        } else {
+            file.with_extension("")
         };
-        for (name, path_attr) in cfg_test_mod_decls(&src) {
+        TestModule { file, dir }
+    }
+
+    fn covers(&self, f: &Path) -> bool {
+        f == self.file || f.starts_with(&self.dir)
+    }
+}
+
+/// Every out-of-line module that only exists under `cfg(test)`: declared with a test-only `cfg`,
+/// or nested (inline or not) inside one. Each file is parsed with `syn`, as the analyzer does.
+fn test_modules(files: &[PathBuf]) -> Vec<TestModule> {
+    let parsed: Vec<(&PathBuf, syn::File)> = files
+        .iter()
+        .filter_map(|f| {
+            let src = fs::read_to_string(f).ok()?;
+            Some((f, syn::parse_file(&blank_frontmatter(&src)).ok()?))
+        })
+        .collect();
+    let mut out: Vec<TestModule> = Vec::new();
+    // A test module's own submodules are test code too, whichever order the files come in, so
+    // repeat until nothing new is found.
+    loop {
+        let before = out.len();
+        for (file, ast) in &parsed {
             let parent = file.parent().unwrap_or(Path::new(""));
             let stem = file
                 .file_stem()
                 .and_then(|s| s.to_str())
                 .unwrap_or_default();
-            let owns_dir = matches!(stem, "mod" | "lib" | "main");
-            if let Some(p) = path_attr {
-                out.insert(parent.join(p));
-                continue;
-            }
-            let dir = if owns_dir {
+            // A file's out-of-line submodules live beside it if it's `mod.rs`/`lib.rs`/`main.rs`,
+            // else in a directory named after it.
+            let dir = if matches!(stem, "mod" | "lib" | "main") {
                 parent.to_path_buf()
             } else {
                 parent.join(stem)
             };
-            for candidate in [
-                dir.join(format!("{name}.rs")),
-                dir.join(&name).join("mod.rs"),
-            ] {
-                if candidate.is_file() {
-                    // `unit/mod.rs` stands for the whole `unit/` directory.
-                    let root = if candidate.ends_with("mod.rs") {
-                        dir.join(&name).with_extension("rs")
-                    } else {
-                        candidate
-                    };
-                    out.insert(root);
+            let in_test = tests_cover(&out, file);
+            let mut found = Vec::new();
+            walk_items(&ast.items, &dir, parent, false, in_test, &mut found);
+            for t in found {
+                if !out.contains(&t) {
+                    out.push(t);
                 }
             }
         }
+        if out.len() == before {
+            return out;
+        }
     }
-    out
 }
 
-/// `(module name, #[path] value)` for each out-of-line `mod name;` whose attributes include a
-/// `cfg` that only holds under `test`. A text scan: it runs before parsing, over every file.
-fn cfg_test_mod_decls(src: &str) -> Vec<(String, Option<String>)> {
-    let mut out = Vec::new();
-    let mut attrs: Vec<&str> = Vec::new();
-    for line in src.lines() {
-        let mut t = line.trim();
-        // Attributes, possibly several on one line ahead of the item: `#[cfg(test)] mod unit;`.
-        while t.starts_with("#[") {
-            let Some(end) = t.find(']') else { break };
-            attrs.push(&t[..=end]);
-            t = t[end + 1..].trim_start();
-        }
-        if t.is_empty() || t.starts_with("//") {
-            continue;
-        }
-        let decl = t
-            .trim_start_matches("pub(crate) ")
-            .trim_start_matches("pub(super) ")
-            .trim_start_matches("pub ");
-        if let Some(name) = decl.strip_prefix("mod ").and_then(|r| r.strip_suffix(';')) {
-            let is_test = attrs.iter().any(|a| {
-                let a: String = a.chars().filter(|c| !c.is_whitespace()).collect();
-                a == "#[cfg(test)]"
-                    || (a.starts_with("#[cfg(all(")
-                        && a.contains("test")
-                        && !a.contains("not(test"))
-            });
-            if is_test {
-                let path = attrs.iter().find_map(|a| {
-                    let rest = a
-                        .strip_prefix("#[path")?
-                        .trim_start()
-                        .strip_prefix('=')?
-                        .trim();
-                    Some(
-                        rest.trim_end_matches(']')
-                            .trim()
-                            .trim_matches('"')
-                            .to_string(),
-                    )
-                });
-                out.push((name.trim().to_string(), path));
+fn tests_cover(tests: &[TestModule], f: &Path) -> bool {
+    tests.iter().any(|t| t.covers(f))
+}
+
+/// Walks `items` of a module whose out-of-line submodules live in `dir`. `#[path]` on a module
+/// that isn't inside an inline block is relative to the file's own directory (`file_dir`).
+fn walk_items(
+    items: &[syn::Item],
+    dir: &Path,
+    file_dir: &Path,
+    inline: bool,
+    test: bool,
+    out: &mut Vec<TestModule>,
+) {
+    for item in items {
+        let syn::Item::Mod(m) = item else { continue };
+        let test = test || is_test_item(&m.attrs);
+        let name = m.ident.to_string();
+        let path_attr = m.attrs.iter().find_map(|a| {
+            let syn::Meta::NameValue(nv) = &a.meta else {
+                return None;
+            };
+            if !nv.path.is_ident("path") {
+                return None;
             }
+            match &nv.value {
+                syn::Expr::Lit(syn::ExprLit {
+                    lit: syn::Lit::Str(s),
+                    ..
+                }) => Some(s.value()),
+                _ => None,
+            }
+        });
+        match (&m.content, path_attr) {
+            (Some((_, inner)), _) => walk_items(inner, &dir.join(&name), file_dir, true, test, out),
+            (None, Some(p)) if test => {
+                let base = if inline { dir } else { file_dir };
+                out.push(TestModule::at(base.join(p)));
+            }
+            (None, None) if test => {
+                for candidate in [
+                    dir.join(format!("{name}.rs")),
+                    dir.join(&name).join("mod.rs"),
+                ] {
+                    if candidate.is_file() {
+                        out.push(TestModule::at(candidate));
+                    }
+                }
+            }
+            _ => {}
         }
-        attrs.clear();
     }
-    out
 }
 
 /// Whether `file` is under `src/` of a package that has `src/main.rs` and no `src/lib.rs`.
@@ -129,31 +154,59 @@ fn in_binary_crate(file: &Path, cache: &mut HashMap<PathBuf, bool>) -> bool {
     let mut dir = file.parent();
     while let Some(d) = dir {
         if d.join("Cargo.toml").is_file() {
-            let pkg = d.to_path_buf();
-            return *cache.entry(pkg.clone()).or_insert_with(|| {
-                file.starts_with(pkg.join("src"))
-                    && pkg.join("src/main.rs").is_file()
-                    && !pkg.join("src/lib.rs").is_file()
+            let binary_only = *cache.entry(d.to_path_buf()).or_insert_with(|| {
+                d.join("src/main.rs").is_file() && !d.join("src/lib.rs").is_file()
             });
+            return binary_only && file.starts_with(d.join("src"));
         }
         dir = d.parent();
     }
     false
 }
 
+/// The directory a file's crate-relative path should be judged from: the parent of its package,
+/// so `crates/foo-test-support/src/lib.rs` keeps its telling directory but not the checkout's.
+pub fn judging_base(file: &Path) -> PathBuf {
+    let mut dir = file.parent();
+    while let Some(d) = dir {
+        if d.join("Cargo.toml").is_file() {
+            return d.parent().map(Path::to_path_buf).unwrap_or_default();
+        }
+        dir = d.parent();
+    }
+    PathBuf::new()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::cfg_test_mod_decls;
+    use super::*;
+
+    fn decls(src: &str, file: &str) -> Vec<TestModule> {
+        let parsed = syn::parse_file(src).expect("test source parses");
+        let mut out = Vec::new();
+        let file = Path::new(file);
+        let parent = file.parent().unwrap_or(Path::new(""));
+        walk_items(&parsed.items, parent, parent, false, false, &mut out);
+        out
+    }
 
     #[test]
-    fn finds_test_module_declarations() {
-        let src = "mod a;\n#[cfg(test)]\nmod unit;\n#[cfg(test)]\n#[path = \"t/x.rs\"]\nmod x;\n#[cfg(not(test))]\nmod real;\n#[cfg(test)] mod inline { }\n#[cfg(test)] mod one_line;\n";
+    fn path_attributes_and_cfg_forms() {
+        let src = "#[cfg(test)]\n#[path = \"spec/mod.rs\"]\nmod spec;\n\
+                   #[cfg(all(feature = \"latest\", unix))]\nmod backend;\n\
+                   #[cfg(all(\n    test,\n    unix\n))]\n#[path = \"u.rs\"]\nmod unit; // unit tests\n";
+        let got = decls(src, "src/lib.rs");
         assert_eq!(
-            cfg_test_mod_decls(src),
+            got,
             vec![
-                ("unit".into(), None),
-                ("x".into(), Some("t/x.rs".into())),
-                ("one_line".into(), None)
+                TestModule {
+                    file: "src/spec/mod.rs".into(),
+                    dir: "src/spec".into()
+                },
+                TestModule {
+                    file: "src/u.rs".into(),
+                    dir: "src/u".into()
+                },
             ]
         );
     }

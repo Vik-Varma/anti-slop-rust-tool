@@ -7,8 +7,27 @@ use crate::analyzer::{FileReport, analyze_source_as};
 use crate::context::FileKind;
 use crate::layout;
 
-/// Directories that hold build output, dependencies or VCS data, never the code under review.
-const SKIP_DIRS: &[&str] = &["target", ".git", "node_modules", "vendor", ".cargo"];
+/// Directories that are never code under review.
+const SKIP_DIRS: &[&str] = &[".git", "node_modules", ".cargo"];
+
+/// `target` and `vendor` are also ordinary module names (`pub mod vendor;`), so they're skipped
+/// only when they are what Cargo makes them: a build directory (Cargo marks it with
+/// `CACHEDIR.TAG`, and it sits next to a manifest) or `cargo vendor` output (crates with a
+/// `.cargo-checksum.json`).
+fn is_generated(dir: &Path, name: &str) -> bool {
+    match name {
+        "target" => {
+            dir.join("CACHEDIR.TAG").is_file()
+                || dir.parent().is_some_and(|p| p.join("Cargo.toml").is_file())
+        }
+        "vendor" => fs::read_dir(dir).is_ok_and(|entries| {
+            entries
+                .flatten()
+                .any(|e| e.path().join(".cargo-checksum.json").is_file())
+        }),
+        _ => false,
+    }
+}
 
 #[derive(Debug)]
 pub enum AnalyzeError {
@@ -52,7 +71,7 @@ pub fn rust_files(root: &Path) -> io::Result<Vec<PathBuf>> {
             let name = name.to_string_lossy();
             let ty = entry.file_type()?;
             if ty.is_dir() {
-                if !SKIP_DIRS.contains(&name.as_ref()) {
+                if !SKIP_DIRS.contains(&name.as_ref()) && !is_generated(&path, &name) {
                     stack.push(path);
                 }
             } else if ty.is_file() && name.ends_with(".rs") {
@@ -69,6 +88,8 @@ pub fn rust_files(root: &Path) -> io::Result<Vec<PathBuf>> {
 pub fn analyze_paths(paths: &[PathBuf]) -> (Vec<(PathBuf, FileReport)>, Vec<AnalyzeError>) {
     let mut reports = Vec::new();
     let mut errors = Vec::new();
+    // `anti-slop . src src/lib.rs` names one file three times; analyse it once.
+    let mut seen = std::collections::HashSet::new();
     for root in paths {
         let files = match rust_files(root) {
             Ok(f) => f,
@@ -77,14 +98,19 @@ pub fn analyze_paths(paths: &[PathBuf]) -> (Vec<(PathBuf, FileReport)>, Vec<Anal
                 continue;
             }
         };
-        // Judge paths from the root's own name down: `anti-slop tests` and `anti-slop tests/a.rs`
-        // see `tests/`, but a checkout that lives inside some `tests/` directory doesn't.
+        let files: Vec<PathBuf> = files
+            .into_iter()
+            .filter(|f| seen.insert(fs::canonicalize(f).unwrap_or_else(|_| f.clone())))
+            .collect();
+        // Judge paths from the root's own name down, so `anti-slop tests` sees `tests/` but a
+        // checkout that lives inside some `tests/` directory doesn't. A single file is judged from
+        // its package's parent, which keeps names like `foo-test-support/` and drops the rest.
         let base = if root.is_file() {
-            Path::new("")
+            layout::judging_base(root)
         } else {
-            root.parent().unwrap_or(Path::new(""))
+            root.parent().unwrap_or(Path::new("")).to_path_buf()
         };
-        let kinds = layout::kinds(base, &files);
+        let kinds = layout::kinds(&base, &files);
         for file in files {
             let kind = kinds
                 .get(&file)

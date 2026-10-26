@@ -47,6 +47,8 @@ pub struct Finding {
     pub message: String,
     /// The enclosing function, as `Type::method` or `function`, when there is one.
     pub function: Option<String>,
+    /// Index of that function in the file's `FileReport::functions`.
+    pub function_index: Option<usize>,
 }
 
 impl fmt::Display for Finding {

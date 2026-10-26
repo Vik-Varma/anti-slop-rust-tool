@@ -71,7 +71,16 @@ fn input_source(receiver: &syn::Expr) -> Option<String> {
         }
         syn::Expr::Call(c) => {
             let path = call_path(c)?;
-            if c.args.iter().all(|a| matches!(peel(a), syn::Expr::Lit(_))) && !c.args.is_empty() {
+            // A parser given a literal fails on the first run, not in production. A file, variable
+            // or address given a literal can still be missing at run time.
+            let parses = path
+                .segments
+                .last()
+                .is_some_and(|s| s.ident.to_string().starts_with("from_"));
+            if parses
+                && !c.args.is_empty()
+                && c.args.iter().all(|a| matches!(peel(a), syn::Expr::Lit(_)))
+            {
                 return None;
             }
             INPUT_FUNCTIONS

@@ -2,6 +2,7 @@ use syn::spanned::Spanned;
 
 use super::{call_path, path_ends_with, peel};
 use crate::analyzer::Analyzer;
+use crate::comments::Line;
 
 pub fn static_mut(a: &mut Analyzer, node: &syn::ItemStatic) {
     if matches!(node.mutability, syn::StaticMutability::Mut(_)) {
@@ -32,7 +33,10 @@ pub fn method_call(a: &mut Analyzer, node: &syn::ExprMethodCall) {
         return;
     };
     let Some(path) = call_path(inner) else { return };
-    if !path_ends_with(path, &["MaybeUninit", "uninit"]) || holds_maybe_uninit(path) {
+    if !path_ends_with(path, &["MaybeUninit", "uninit"])
+        || holds_maybe_uninit(path)
+        || a.scope().uninit_array_target
+    {
         return;
     }
     a.emit(
@@ -44,6 +48,12 @@ pub fn method_call(a: &mut Analyzer, node: &syn::ExprMethodCall) {
 
 /// `MaybeUninit::<[MaybeUninit<T>; N]>::uninit().assume_init()` is the one sound use: the outer
 /// value is an array of things that are allowed to be uninitialised.
+/// `[MaybeUninit<T>; N]`, written out as a type.
+pub fn is_maybe_uninit_array(ty: &syn::Type) -> bool {
+    let s = quote::quote!(#ty).to_string();
+    s.trim_start().starts_with('[') && s.contains("MaybeUninit")
+}
+
 fn holds_maybe_uninit(path: &syn::Path) -> bool {
     path.segments.iter().any(|seg| {
         let syn::PathArguments::AngleBracketed(args) = &seg.arguments else {
@@ -62,7 +72,7 @@ fn holds_maybe_uninit(path: &syn::Path) -> bool {
 pub fn unsafe_block(a: &mut Analyzer, node: &syn::ExprUnsafe) {
     let line = node.unsafe_token.span().start().line;
     let first_inner = node.block.brace_token.span.open().start().line + 1;
-    if has_safety_comment(a.lines, line) || has_comment(a.lines.get(first_inner - 1).copied()) {
+    if has_safety_comment(a, line) || justifies(a.comments.get(first_inner - 1)) {
         return;
     }
     a.emit(
@@ -74,7 +84,7 @@ pub fn unsafe_block(a: &mut Analyzer, node: &syn::ExprUnsafe) {
 
 pub fn unsafe_impl(a: &mut Analyzer, node: &syn::ItemImpl) {
     let Some(token) = &node.unsafety else { return };
-    if has_safety_comment(a.lines, token.span().start().line) {
+    if has_safety_comment(a, token.span().start().line) {
         return;
     }
     a.emit(
@@ -84,39 +94,48 @@ pub fn unsafe_impl(a: &mut Analyzer, node: &syn::ItemImpl) {
     );
 }
 
-fn has_comment(line: Option<&str>) -> bool {
-    line.and_then(|l| l.find("//").or_else(|| l.find("/*")))
-        .is_some()
+/// A comment that could justify `unsafe`: any ordinary comment. Doc comments describe the item
+/// to its users, not why a block inside it is sound, so they don't count.
+fn justifies(line: Option<&Line>) -> bool {
+    line.is_some_and(|l| l.has_comment() && !l.doc)
 }
 
 /// A comment justifying the `unsafe`: on its own line, in the run of comment and attribute lines
-/// just above it, or (for `let x = unsafe { .. }` split over lines) above the statement's first
+/// just above it, or (for `let x =` then `unsafe {` on the next line) above the statement's first
 /// line. Any wording counts. The std library writes `// SAFETY:`, but the audit in
 /// docs/EVIDENCE.md found real justifications in other words, and the rule is about there being
 /// an argument at all.
-fn has_safety_comment(lines: &[&str], line: usize) -> bool {
-    if has_comment(lines.get(line.wrapping_sub(1)).copied()) {
+fn has_safety_comment(a: &Analyzer, line: usize) -> bool {
+    let info = |n: usize| if n == 0 { None } else { a.comments.get(n - 1) };
+    if justifies(info(line)) {
         return true;
     }
-    let mut i = line.saturating_sub(1);
+    let mut n = line.saturating_sub(1);
     let mut stepped_over_code = false;
-    while i > 0 {
-        let t = lines[i - 1].trim();
-        if t.starts_with("//") || t.starts_with("/*") || t.starts_with('*') {
-            return true;
-        } else if t.starts_with("#[") {
-            if has_comment(Some(t)) {
+    while n > 0 {
+        let l = info(n).expect("line in range");
+        let text = a.lines.get(n - 1).map(|t| t.trim()).unwrap_or_default();
+        if l.only_comment() {
+            if !l.doc {
                 return true;
             }
-        } else if !stepped_over_code && !t.is_empty() && !t.ends_with(';') && !t.ends_with('}') {
+        } else if text.starts_with("#[") {
+            if justifies(Some(l)) {
+                return true;
+            }
+        } else if !stepped_over_code
+            && l.code
+            && (text.ends_with('=') || text.ends_with('(') || text.ends_with(','))
+        {
+            // The first line of a statement that continues onto the `unsafe` line.
             stepped_over_code = true;
-            if has_comment(Some(t)) {
+            if justifies(Some(l)) {
                 return true;
             }
         } else {
             return false;
         }
-        i -= 1;
+        n -= 1;
     }
     false
 }

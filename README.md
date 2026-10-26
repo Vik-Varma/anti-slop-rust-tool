@@ -33,7 +33,7 @@ anti-slop path/to/crate                 # warnings and errors; exit 1 if any
 anti-slop --min-severity note path      # also the notes: real mechanisms, usually deliberate
 anti-slop --format json path
 anti-slop rules                         # the catalogue
-anti-slop explain lock-held-across-await
+anti-slop explain panic-on-input
 anti-slop metrics --format csv path     # per-function size, complexity and finding counts
 ```
 
@@ -55,20 +55,25 @@ Shown by default:
 | Rule | Severity | Flags | Evidence |
 |---|---|---|---|
 | `uninit-memory` | error | `mem::uninitialized()`, `MaybeUninit::uninit().assume_init()` | Miri reports UB |
-| `lock-held-across-await` | error | a std/parking_lot guard alive at an `.await` | deadlock reproduced; 7/7 in the audit |
-| `todo` | warning | `todo!()` in shipping code | 10/10 real in the audit |
 | `blocking-sleep-in-async` | warning | `thread::sleep` in async code | other tasks get 0 turns during the sleep |
 | `float-eq-inexact` | warning | `x == 0.1` (literals with no exact binary value) | `0.1 + 0.2 != 0.3`; exact literals are left alone |
 | `deny-warnings` | warning | `#![deny(warnings)]` in a crate root | builds on Rust 1.76, fails on 1.99 |
 
-Notes (`--min-severity note`). Each mechanism is real, but most audited findings were deliberate
-or safe, so they're review prompts rather than verdicts:
+Each of these four flags exactly the construct its experiment shows failing, so a finding is the
+real thing. Mature projects don't contain them: on the 37 audited codebases, the default run
+reports nothing.
 
-| Rule | Flags | Audit |
+Notes (`--min-severity note`). Each mechanism is real and reproduced, but in a two-rater audit most
+findings were guarded by something a syntax check can't see, so they're review prompts rather than
+verdicts:
+
+| Rule | Flags | Audit (settled) |
 |---|---|---|
-| `panic-on-input` | `.unwrap()` on parse/decode/file/env/`to_str` results | 8/20 crash on real input |
+| `lock-held-across-await` | a std/parking_lot/stdout guard alive at an `.await` | 7/7 real patterns, 0/7 could deadlock as written |
 | `ignored-io-error` | `let _ =`/`.ok();` on write/flush/sync/rename in a fn returning `Result` | 4/10 |
-| `panic-in-drop` | `unwrap`/`expect`/`panic!` in `Drop::drop`, unless guarded by `thread::panicking()` | 3/10 |
+| `todo` | `todo!()` in shipping code | 4/10 reachable |
+| `panic-on-input` | `.unwrap()` on parse/decode/file/env/`to_str` results | 5/20 crash on real input |
+| `panic-in-drop` | `unwrap`/`expect`/`panic!` in `Drop::drop`, unless guarded by `thread::panicking()` | 1/10 |
 | `unwrap` | other `.unwrap()` in shipping code | 2/20 |
 | `static-mut` | `static mut` | 0/10 races |
 | `process-exit-in-library` | `process::exit` in a library crate | 0/10 lost data |

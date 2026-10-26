@@ -28,18 +28,18 @@ the pattern at all.
 | Rule | Claim | Experiment | Audit | Verdict |
 |---|---|---|---|---|
 | `uninit-memory` | Reading uninitialised memory is UB | Miri: UB for `MaybeUninit::<u32>::uninit().assume_init()` and `mem::uninitialized::<u32>()`; the `[MaybeUninit<T>; N]` form is clean. `mem::uninitialized::<&u8>()` aborts the process | no instances | **error** |
-| `lock-held-across-await` | A sync guard held over `.await` deadlocks | Current-thread Tokio, two futures: std `Mutex` hangs (2 s timeout); `tokio::sync::Mutex` completes | 7/7 match the pattern (6 in tests) | **error** |
-| `todo` | `todo!()` ships and panics | panics "not yet implemented" | 10/10 real unfinished paths | **warning** |
+| `lock-held-across-await` | A sync guard held over `.await` deadlocks | Current-thread Tokio, two futures: std `Mutex` hangs (2 s timeout); `tokio::sync::Mutex` completes | 7/7 really hold a guard across `.await`; 0/7 can deadlock as written, since nothing else takes the lock meanwhile (6 in tests) | **note** |
+| `todo` | `todo!()` ships and panics | panics "not yet implemented" | 4/10 reachable; the rest are `todo!()` used as `unreachable!()` on paths no caller reaches | **note** |
 | `blocking-sleep-in-async` | `thread::sleep` stalls the executor | a 5 ms ticker runs 0 times during a 200 ms `thread::sleep` and keeps ticking during `tokio::time::sleep` (current-thread runtime) | 0 outside tests; all 10 in tests deliberate, so tests exempt | **warning** |
 | `float-eq-inexact` | `==` with an inexact literal is unreliable | `0.1 + 0.2 != 0.3`; `0.25 + 0.25 == 0.5` | no instances | **warning** (exact literals not flagged) |
 | `deny-warnings` | `#![deny(warnings)]` breaks on newer compilers | same file builds on 1.76, fails on 1.99 (`static_mut_refs`) | 0 in crate roots; 31 in examples/tests/benches, now exempt | **warning** |
-| `panic-on-input` | unwrap on parse/IO/env results crashes on bad input | `unwrap` panics without context, and a panic poisons shared locks; Cloudflare's 18 Nov 2025 outage (unwrap on an `Err` after a generated file exceeded 200 features) | 8/20 crash on real external input | **note** (below 50%) |
-| `panic-in-drop` | Panicking in `Drop` during unwinding aborts | SIGABRT, "panic in a destructor during cleanup"; `catch_unwind` never runs | 3/10 on fallible operations | **note** |
+| `panic-on-input` | unwrap on parse/IO/env results crashes on bad input | `unwrap` panics without context, and a panic poisons shared locks; Cloudflare's 18 Nov 2025 outage (unwrap on an `Err` after a generated file exceeded 200 features) | 5/20 crash on real external input | **note** |
+| `panic-in-drop` | Panicking in `Drop` during unwinding aborts | SIGABRT, "panic in a destructor during cleanup"; `catch_unwind` never runs | 1/10 can realistically fire | **note** |
 | `ignored-io-error` | `let _ =` on a write loses data silently | `/dev/full`: `write_all` returns ENOSPC, the ignoring caller reports success; `BufWriter` drop swallows the error | 4/10 hid a failure from a caller expecting errors | **note** |
 | `process-exit-in-library` | `exit` skips destructors | `BufWriter` record lost, process exits 0 | 10/10 libraries exiting; 0/10 lost data | **note** |
 | `static-mut` | `static mut` invites data races | Miri: data race on a two-thread counter; atomic version clean | 0/10 races; 10/10 deliberate (FFI, guarded) | **note** |
 | `len-truncating-cast` | `len() as u32` wraps silently | a real 4 GiB + 1 `Vec`: `len() as u32 == 1` | 0/20 shown reachable | **note** |
-| `unwrap` | unwrap panics without context | as above | 2/20 on fallible operations | **note** |
+| `unwrap` | unwrap panics without context | as above | 2/20 can fail at run time | **note** |
 | `dbg-macro` | `dbg!` leaks to stderr in release | (behaviour documented in std) | 1/10 accidental | **note** |
 | `unsafe-without-comment` | unsafe needs a written justification | none possible: this is Rust project policy (std-dev guide; Clippy `undocumented_unsafe_blocks`) | 20/20 lacked one; none shown unsound. Study: OR 1.18 [0.75, 1.87] discovery, 1.92 [1.11, 3.35] replication, neither significant after Holm correction | **note** (consensus) |
 
@@ -116,8 +116,11 @@ Full tables, including the flexible-size and changed-functions-only robustness c
   edited to fix a bug that lives elsewhere.
 - **Power.** Rare patterns (deferral and hedging phrases, `panic-in-drop`) have wide intervals.
   "No evidence" is not "evidence of no effect" for them.
-- **Audit.** One person (the author) judged the samples, from code context, without running the
-  code. The samples, seeds and judgments are in [AUDIT.md](AUDIT.md) so they can be re-judged.
+- **Audit.** The validation sample was judged by two raters: the author, and an independent agent
+  blind to these docs that traced callers. Agreement was moderate (80%, κ = 0.54). Where they
+  disagreed, the rater who traced the code was usually right, and its verdicts were taken. Samples
+  are 10 to 20 findings per rule, so a figure like 5/20 means roughly 10% to 45%. Neither rater
+  ran the code. Everything needed to re-judge is in [AUDIT.md](AUDIT.md).
 
 ## Sources and how they were checked
 

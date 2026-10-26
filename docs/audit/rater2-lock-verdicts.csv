@@ -1,0 +1,8 @@
+n,pattern,harm,reason
+0,YES,NO,"mock_apis guard (l.2650) alive; map only locked when POST /session creates client"
+1,YES,NO,"mock_apis guard (l.1389) alive at sleep; server aborted, nothing else locks map"
+2,YES,NO,"first_messages_sent/sessions_created guards alive; only locked once at session spawn, already done"
+3,YES,NO,"StdoutLock held across download; no progress bar here, nothing else writes stdout"
+4,YES,NO,"mock_apis guard (l.526) alive; no new session created during close"
+5,YES,NO,"Duplicate of #2 (same line); guards alive, no contender"
+6,YES,NO,"mock_apis guard (l.1135) alive; both clients created earlier, no contender"

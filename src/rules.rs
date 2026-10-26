@@ -86,7 +86,7 @@ static RULES: &[Rule] = &[
                unwrap on the result of loading a generated feature file that had grown past a limit.",
         false_positives: "Input the program wrote itself moments before, or that a previous step validated.",
         evidence: Evidence::Demonstrated,
-        precision: "validation sample (docs/AUDIT.md): 8 of 20 crash on real external input (non-UTF-8 paths and arguments, env vars, dump files, process output); the rest were validated data or dev tooling",
+        precision: "validation sample, two raters (docs/AUDIT.md): 5 of 20 crash on real external input (non-UTF-8 paths and arguments, env vars, dump files, process output); the rest were validated data or dev tooling",
         sources: &[
             BOOK_PANIC,
             BOOK_EXPECT,
@@ -109,7 +109,7 @@ static RULES: &[Rule] = &[
                           code, `lock().unwrap()`, unwraps of literals and of `write!` (formatting into a \
                           `String` can't fail).",
         evidence: Evidence::Demonstrated,
-        precision: "validation sample (docs/AUDIT.md): 2 of 20 on fallible operations; 15 asserted invariants the code maintains; 3 in dev-only binaries",
+        precision: "validation sample, two raters (docs/AUDIT.md): 2 of 20 can fail at run time; the rest asserted invariants the code maintains, or were dev-only",
         sources: &[
             BOOK_PANIC,
             BOOK_EXPECT,
@@ -120,7 +120,7 @@ static RULES: &[Rule] = &[
     Rule {
         id: "todo",
         category: Category::Correctness,
-        severity: Severity::Warning,
+        severity: Severity::Note,
         summary: "`todo!()` in shipping code",
         harm: "It type-checks as any type, so unfinished code compiles and ships, then panics with \"not \
                yet implemented\" when the path is reached. `unimplemented!()` isn't flagged: the std \
@@ -128,7 +128,7 @@ static RULES: &[Rule] = &[
                used that way (unsupported backend features, mocks).",
         false_positives: "None for the panic itself.",
         evidence: Evidence::Demonstrated,
-        precision: "validation sample (docs/AUDIT.md): 10 of 10 unfinished paths reachable in shipping code",
+        precision: "validation sample, two raters (docs/AUDIT.md): 4 of 10 reachable; the rest sat on branches nothing can reach, i.e. `todo!()` used as `unreachable!()`",
         sources: &[
             "std::todo: https://doc.rust-lang.org/std/macro.todo.html",
             "experiments/tests/panics.rs: todo_compiles_and_panics_at_runtime",
@@ -160,7 +160,7 @@ static RULES: &[Rule] = &[
                with \"panic in a destructor during cleanup\".",
         false_positives: "An assertion of an internal invariant that only fails if the program is already broken.",
         evidence: Evidence::Demonstrated,
-        precision: "validation sample (docs/AUDIT.md): 3 of 10 on fallible operations (a poisoned lock, a syscall); 7 asserted internal invariants or were deliberate",
+        precision: "validation sample, two raters (docs/AUDIT.md): 1 of 10 can realistically fire (an io_uring syscall); the rest asserted invariants or were deliberate",
         sources: &[
             API_DTOR,
             "std::ops::Drop, panics: https://doc.rust-lang.org/std/ops/trait.Drop.html",
@@ -223,14 +223,14 @@ static RULES: &[Rule] = &[
     Rule {
         id: "lock-held-across-await",
         category: Category::Concurrency,
-        severity: Severity::Error,
+        severity: Severity::Note,
         summary: "A sync lock guard (`lock()`, `read()`, `write()`) alive at an `.await`",
         harm: "While the task is suspended it still holds the lock; any other task on that thread that calls \
                `lock()` blocks the thread, so the holder can never resume to release it. Verified deadlock \
                on a current-thread Tokio runtime; the same code with `tokio::sync::Mutex` finishes.",
         false_positives: "A `lock()` method on a type that isn't a lock. Guards moved elsewhere aren't tracked.",
         evidence: Evidence::Demonstrated,
-        precision: "7 of 7 (all instances) hold a std or terminal lock guard across an `.await`; 6 are in tests",
+        precision: "two raters (docs/AUDIT.md): 7 of 7 really hold a sync guard across `.await`, 0 of 7 can deadlock as written (nothing else takes the lock meanwhile); 6 were in tests",
         sources: &[
             "Clippy await_holding_lock (suspicious): https://rust-lang.github.io/rust-clippy/master/index.html#await_holding_lock",
             "Tokio Mutex docs, which mutex to use: https://docs.rs/tokio/latest/tokio/sync/struct.Mutex.html",
@@ -266,7 +266,7 @@ static RULES: &[Rule] = &[
         false_positives: "Best-effort writes where loss is acceptable. Writes to stdout/stderr and removals \
                           aren't flagged.",
         evidence: Evidence::Demonstrated,
-        precision: "validation sample (docs/AUDIT.md): 4 of 10 hid a failed flush or write from a caller expecting an error; 6 were best-effort writes on an error path or during shutdown",
+        precision: "validation sample, two raters (docs/AUDIT.md): 4 of 10 hid a failed flush or write from a caller expecting an error; 6 were best-effort writes on an error path or during shutdown",
         sources: &[
             "CWE-252 Unchecked Return Value: https://cwe.mitre.org/data/definitions/252.html",
             "Yuan et al., Simple Testing Can Prevent Most Critical Failures, OSDI 2014: https://www.usenix.org/conference/osdi14/technical-sessions/presentation/yuan",

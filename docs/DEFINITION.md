@@ -33,10 +33,17 @@ hypotheses written down before the confirming data was collected ([EVIDENCE.md](
 The 50% bar is a floor, not a target. Google's Tricorder (Sadowski et al., ICSE 2015,
 <https://research.google/pubs/pub43322/>) enforces "a very low effective false positive rate
 (< 10%)", puts an analysis whose not-useful rate reaches 10% on probation, and may disable it
-above 25%. The default rules with audit data (`todo`: 10/10, `lock-held-across-await`: 7/7) meet
-that bar. The rest of the default set had no instances in shipping code to audit, and their
-checks are exact by construction (`uninit-memory`, `float-eq-inexact`, `deny-warnings`,
-`blocking-sleep-in-async`). Every note would fail it, which is why notes are off by default.
+above 25%. The four default rules are exact by construction: each flags only the precise
+construct its experiment shows failing (`uninit-memory`, `float-eq-inexact`, `deny-warnings`,
+`blocking-sleep-in-async`). They also had no instances in shipping code to audit, since mature
+projects don't contain them. Every rule with audit data fell short of the 50% bar once a second,
+independent rater traced the code: `todo` (4/10 reachable) and `lock-held-across-await` (7/7 real
+patterns, 0/7 able to deadlock as written) included. So all of them are notes.
+
+What that means in practice: the default run reports almost nothing on mature, well-reviewed
+code, because almost nothing in it is demonstrably bad by a check that can be trusted without type
+information. The notes are where review effort goes; each is a real failure mechanism that, in the
+audit, was usually guarded by something a syntax check can't see.
 
 ## What is deliberately not "bad code" here
 

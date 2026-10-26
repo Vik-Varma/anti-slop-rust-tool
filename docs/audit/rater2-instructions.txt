@@ -1,0 +1,7 @@
+Judge each finding YES if the failure described for its rule can realistically happen in code that ships to users, NO otherwise. Code that only runs in tests, test shims, benchmarks, fuzzers or developer tooling counts as NO. An internal invariant that the surrounding code visibly maintains counts as NO.
+
+todo             `todo!()` reached at run time panics. YES if the path is reachable in shipping code.
+panic-on-input   `.unwrap()` on a parse / decode / file / env-var / path-to_str / process-output result. YES if the value can come from outside the program (files, user input, environment, network, other processes, file names) so bad input crashes the program.
+ignored-io-error `let _ =` or `.ok();` on a write/flush/sync/rename inside a function returning Result. YES if a failure here means data didn't arrive while the caller is told it succeeded.
+panic-in-drop    A panic inside Drop::drop. YES if the panic can realistically fire (a fallible operation such as I/O, a syscall, a possibly-poisoned lock), since panicking during unwinding aborts the process.
+unwrap           Any other `.unwrap()` in shipping code. YES if the unwrapped operation can realistically fail at run time (I/O, external data, a state the code doesn't guarantee).

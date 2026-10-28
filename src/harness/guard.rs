@@ -94,6 +94,55 @@ fn code_lines(src: &str) -> usize {
     metrics::code_lines(&lines, 1, lines.len())
 }
 
+/// Files where a compiler flag takes effect, as opposed to being mentioned: cargo config,
+/// manifests, CI, scripts, build scripts. Prose and ordinary source only talk about flags.
+fn carries_flags(c: &Changed) -> bool {
+    let p = c.path.to_string_lossy().replace('\\', "/");
+    let name = c
+        .path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or_default();
+    p.contains(".cargo/")
+        || name == "Cargo.toml"
+        || name == "build.rs"
+        || p.starts_with(".github/workflows/")
+        || matches!(name, "Makefile" | "justfile" | "Justfile" | "Dockerfile")
+        || name.ends_with(".sh")
+        || name.ends_with(".yml")
+        || name.ends_with(".yaml")
+        || name.starts_with("rust-toolchain")
+}
+
+/// A source line split into its code, with string literals blanked out, and its comment, if
+/// any. Markers inside a string literal (`"todo!("`, a quoted `// anti-slop: allow(..)`) are
+/// mentions, not the thing, and this is what keeps the detectors off them.
+fn split_line(line: &str) -> (String, Option<&str>) {
+    let mut code = String::with_capacity(line.len());
+    let mut in_string = false;
+    let mut chars = line.char_indices().peekable();
+    while let Some((i, c)) = chars.next() {
+        if in_string {
+            match c {
+                '\\' => {
+                    chars.next();
+                }
+                '"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match c {
+            '"' => in_string = true,
+            '/' if matches!(chars.peek(), Some((_, '/')) | Some((_, '*'))) => {
+                return (code, Some(&line[i..]));
+            }
+            _ => code.push(c),
+        }
+    }
+    (code, None)
+}
+
 /// Runs every detector over `changes`.
 pub fn run(root: &Path, base: &Base, policy: &Policy, changes: &[Changed]) -> Report {
     let mut r = Report {
@@ -126,19 +175,30 @@ pub fn run(root: &Path, base: &Base, policy: &Policy, changes: &[Changed]) -> Re
                 ),
             );
         }
-        for (n, l) in &c.added {
-            if l.contains("target-cpu=native") || l.contains("RUSTFLAGS") || l.contains("rustflags")
-            {
-                push("flags", &c.path, Some(*n), format!("`{}`", l.trim()));
+        if carries_flags(c) {
+            for (n, l) in &c.added {
+                if l.contains("target-cpu=native")
+                    || l.contains("RUSTFLAGS")
+                    || l.contains("rustflags")
+                {
+                    push("flags", &c.path, Some(*n), format!("`{}`", l.trim()));
+                }
             }
         }
         if !c.is_rust() {
             continue;
         }
+        // Tests are left out of the deferral check: their fixtures quote these, and the rules
+        // exempt tests too.
+        let test_file = measuring_stick(c) == Some("test file");
         for (n, l) in &c.added {
             let t = l.trim();
-            if let Some(rest) = t.split("anti-slop: allow(").nth(1) {
-                let (rule, reason) = rest.split_once(')').unwrap_or((rest, ""));
+            let (code, comment) = split_line(t);
+            // Only a suppression of a real rule counts; prose quoting the syntax doesn't.
+            if let Some(rest) = comment.and_then(|c| c.split("anti-slop: allow(").nth(1))
+                && let Some((rule, reason)) = rest.split_once(')')
+                && crate::rules::get(rule.trim()).is_some()
+            {
                 let reason = reason.trim();
                 if reason.chars().count() < policy.min_reason_chars {
                     push(
@@ -163,11 +223,13 @@ pub fn run(root: &Path, base: &Base, policy: &Policy, changes: &[Changed]) -> Re
                     );
                 }
             }
-            if t.starts_with("#[allow(") || t.starts_with("#![allow(") || t.starts_with("#[expect(")
+            if code.starts_with("#[allow(")
+                || code.starts_with("#![allow(")
+                || code.starts_with("#[expect(")
             {
                 push("allow-attributes", &c.path, Some(*n), format!("`{t}`"));
             }
-            if t.contains("#[ignore") {
+            if code.starts_with("#[ignore") {
                 push(
                     "tests-ignored",
                     &c.path,
@@ -175,14 +237,15 @@ pub fn run(root: &Path, base: &Base, policy: &Policy, changes: &[Changed]) -> Re
                     "`#[ignore]` added".into(),
                 );
             }
-            if t.contains("todo!(") || t.contains("unimplemented!(") {
-                push(
-                    "deferrals",
-                    &c.path,
-                    Some(*n),
-                    format!("`{}`", t.split('(').next().unwrap_or(t)),
-                );
-            } else if let Some(comment) = t.split("//").nth(1)
+            if test_file {
+                continue;
+            }
+            if let Some(mac) = ["todo!(", "unimplemented!("]
+                .iter()
+                .find(|m| code.contains(*m))
+            {
+                push("deferrals", &c.path, Some(*n), format!("`{mac})` added"));
+            } else if let Some(comment) = comment
                 && ["TODO", "FIXME", "HACK", "XXX"]
                     .iter()
                     .any(|m| comment.contains(m))
@@ -322,5 +385,62 @@ mod tests {
         // Dependency edits to Cargo.toml aren't a measuring stick.
         assert!(!r.items.iter().any(|i| i.path == Path::new("Cargo.toml")));
         assert_eq!(r.blocking(), 4);
+    }
+
+    #[test]
+    fn mentions_are_not_the_thing() {
+        let policy = Policy::default();
+        let changes = vec![
+            changed(
+                "README.md",
+                &[(1, "never add target-cpu=native or RUSTFLAGS")],
+                &[],
+            ),
+            changed(
+                "src/mention.rs",
+                &[
+                    (1, "const K: &str = \"RUSTFLAGS\";"),
+                    (2, "let s = \"// anti-slop: allow(todo) x\";"),
+                    (3, "let t = \"todo!()\";"),
+                ],
+                &[],
+            ),
+            changed(
+                "tests/fixture.rs",
+                &[(1, "    todo!()"), (2, "    // TODO later")],
+                &[],
+            ),
+            changed(
+                "build.rs",
+                &[(
+                    1,
+                    "println!(\"cargo:rustc-env=RUSTFLAGS=-C target-cpu=native\");",
+                )],
+                &[],
+            ),
+            changed("src/real.rs", &[(1, "    todo!() // TODO: finish")], &[]),
+        ];
+        let r = run(
+            Path::new("/nonexistent"),
+            &Base::Rev("HEAD".into()),
+            &policy,
+            &changes,
+        );
+        let kinds: Vec<(&str, &str)> = r
+            .items
+            .iter()
+            .map(|i| (i.kind, i.path.to_str().unwrap_or_default()))
+            .collect();
+        assert_eq!(
+            kinds,
+            vec![
+                ("measuring-stick", "tests/fixture.rs"),
+                ("flags", "build.rs"),
+                ("deferrals", "src/real.rs"),
+            ],
+            "{:#?}",
+            r.items
+        );
+        assert_eq!(r.items[2].detail, "`todo!()` added");
     }
 }

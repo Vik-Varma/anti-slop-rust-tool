@@ -29,6 +29,7 @@ hypotheses written down before the confirming data was collected ([EVIDENCE.md](
 | error | yes | A reproduced failure that is undefined behaviour or a deadlock, and audit precision ≥ 50% (or no false positive possible by construction) |
 | warning | yes | A reproduced failure, and audit precision ≥ 50% on a validation sample the rule was not tuned on (or no false positive possible by construction) |
 | note | with `--min-severity note` | A reproduced failure or Rust-project consensus, but most findings in the audit were deliberate or safe |
+| style | with `--min-severity style` | Not bad code by this definition: a preference stated by Google's Rust style guide, provided for teams that follow it. Each rule quotes the guide's reason and encodes the exceptions the guide lists ([STYLE.md](STYLE.md)) |
 
 The 50% bar is a floor, not a target. Google's Tricorder (Sadowski et al., ICSE 2015,
 <https://research.google/pubs/pub43322/>) enforces "a very low effective false positive rate
@@ -76,6 +77,12 @@ numbers for each:
   it marking unsupported features and mocks.
 - **`mem::forget`**: it can leak, but in the audit every use was a deliberate hand-off of
   ownership.
+
+- **Style-guide rules with no failure behind them.** Google's Rust style guide was read claim by
+  claim ([EVIDENCE.md](EVIDENCE.md)). The one rule with a reproducible failure became
+  `catch-unwind-under-panic-abort`. Its import, naming, macro, `Rc`/`Arc`, documentation and
+  formatting rules are preferences; they exist here as opt-in style rules that say so
+  ([STYLE.md](STYLE.md)), not as findings of bad code.
 
 None of this says such code is pleasant to read. It says the evidence doesn't show it causes
 defects, so a tool shouldn't call it bad.

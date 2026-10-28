@@ -1,6 +1,8 @@
 //! The rule catalogue: what each rule flags, why that is bad, and the evidence. Only claims that
 //! survived the checks in docs/EVIDENCE.md are here; the ones that didn't are listed there too.
 
+mod style;
+
 use crate::Severity;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -13,6 +15,8 @@ pub enum Category {
     Concurrency,
     /// Code that breaks other people's builds.
     Maintainability,
+    /// A published style guide's preference; no failure behind it.
+    Style,
 }
 
 impl Category {
@@ -22,6 +26,7 @@ impl Category {
             Category::ErrorHandling => "error-handling",
             Category::Concurrency => "concurrency",
             Category::Maintainability => "maintainability",
+            Category::Style => "style",
         }
     }
 }
@@ -34,6 +39,9 @@ pub enum Evidence {
     /// Authoritative sources agree on it, but it is a review practice: there is no failure to
     /// reproduce, and the defect study found no measurable effect either way.
     Consensus,
+    /// A style guide says so (Google's Rust style guide). Not "bad code" by docs/DEFINITION.md:
+    /// off by default, and each rule records the guide's own exceptions.
+    Style,
 }
 
 impl Evidence {
@@ -41,6 +49,7 @@ impl Evidence {
         match self {
             Evidence::Demonstrated => "demonstrated",
             Evidence::Consensus => "consensus",
+            Evidence::Style => "style",
         }
     }
 }
@@ -59,15 +68,19 @@ pub struct Rule {
     pub evidence: Evidence,
     /// Hand-checked findings from the corpus audit that were what the rule says they are.
     pub precision: &'static str,
+    /// The exceptions the source lists, and whether the check honours each by itself or needs a
+    /// suppression comment naming it. Empty for rules whose source lists none.
+    pub exceptions: &'static str,
     pub sources: &'static [&'static str],
 }
 
-pub fn all() -> &'static [Rule] {
-    RULES
+/// Every rule: the evidence-backed ones, then the style rules.
+pub fn all() -> impl Iterator<Item = &'static Rule> {
+    RULES.iter().chain(style::STYLE_RULES.iter())
 }
 
 pub fn get(id: &str) -> Option<&'static Rule> {
-    RULES.iter().find(|r| r.id == id)
+    all().find(|r| r.id == id)
 }
 
 const BOOK_PANIC: &str = "Rust Book ch. 9.3, To panic! or Not to panic!: https://doc.rust-lang.org/book/ch09-03-to-panic-or-not-to-panic.html";
@@ -89,6 +102,7 @@ static RULES: &[Rule] = &[
         false_positives: "Input the program wrote itself moments before, or that a previous step validated.",
         evidence: Evidence::Demonstrated,
         precision: "validation sample, two raters (docs/AUDIT.md): 5 of 20 crash on real external input (non-UTF-8 paths and arguments, env vars, dump files, process output); the rest were validated data or dev tooling",
+        exceptions: "",
         sources: &[
             BOOK_PANIC,
             BOOK_EXPECT,
@@ -113,6 +127,7 @@ static RULES: &[Rule] = &[
                           `String` can't fail).",
         evidence: Evidence::Demonstrated,
         precision: "validation sample, two raters (docs/AUDIT.md): 2 of 20 can fail at run time; the rest asserted invariants the code maintains, or were dev-only",
+        exceptions: "",
         sources: &[
             BOOK_PANIC,
             BOOK_EXPECT,
@@ -134,6 +149,7 @@ static RULES: &[Rule] = &[
         false_positives: "None for the panic itself.",
         evidence: Evidence::Demonstrated,
         precision: "census, two raters (docs/AUDIT.md): 6 of 15 reachable; the rest sat on branches nothing can reach, i.e. `todo!()` used as `unreachable!()`",
+        exceptions: "",
         sources: &[
             "std::todo: https://doc.rust-lang.org/std/macro.todo.html",
             "experiments/tests/panics.rs: todo_compiles_and_panics_at_runtime",
@@ -150,6 +166,7 @@ static RULES: &[Rule] = &[
         false_positives: "Deliberate debug output, e.g. gated on an environment variable.",
         evidence: Evidence::Demonstrated,
         precision: "first audit: 1 of 10 accidental; 9 deliberate debug output behind a flag",
+        exceptions: "",
         sources: &[
             "std::dbg: https://doc.rust-lang.org/std/macro.dbg.html",
             "Clippy dbg_macro (restriction): https://rust-lang.github.io/rust-clippy/master/index.html#dbg_macro",
@@ -166,6 +183,7 @@ static RULES: &[Rule] = &[
         false_positives: "An assertion of an internal invariant that only fails if the program is already broken.",
         evidence: Evidence::Demonstrated,
         precision: "validation sample, two raters (docs/AUDIT.md): 1 of 10 can realistically fire (an io_uring syscall); the rest asserted invariants or were deliberate",
+        exceptions: "",
         sources: &[
             API_DTOR,
             "std::ops::Drop, panics: https://doc.rust-lang.org/std/ops/trait.Drop.html",
@@ -178,9 +196,10 @@ static RULES: &[Rule] = &[
         severity: Severity::Warning,
         summary: "`catch_unwind` in a package whose workspace profile sets `panic = \"abort\"`",
         harm: "With `panic = \"abort\"` the process ends at the panic, so `catch_unwind` never returns `Err` and whatever that arm was for (an error report, a fallback, a cleanup) doesn't happen. A test suite can't show it: Cargo builds tests with unwinding whatever the profile says, so the arm runs under `cargo test` and never in the shipped binary.",
-        false_positives: "The strategy is read as Cargo reads it, from the workspace root's Cargo.toml and a `.cargo/config.toml` beside it; a config file elsewhere, a `CARGO_PROFILE_*_PANIC` variable or a `--config` flag can change it and isn't seen. Proc-macro crates, build scripts and tests are exempt, as Cargo ignores the setting for them. A `catch_unwind` kept only as defence in depth that nothing relies on is still flagged, since it still can't run.",
+        false_positives: "The strategy is read as Cargo reads it, from the workspace root's Cargo.toml and a `.cargo/config.toml` beside it; a config file elsewhere, a `CARGO_PROFILE_*_PANIC` variable or a `--config` flag can change it and isn't seen. Proc-macro crates, build scripts and tests are exempt, as Cargo ignores the setting for them. A `catch_unwind` kept only as defence in depth that nothing relies on is still flagged, since it still can't run. A local function that happens to be named `catch_unwind` is taken for std's.",
         evidence: Evidence::Demonstrated,
         precision: "exact by construction given the profile; 1 instance in the corpus (tauri's `packages/cli` reports a CLI panic to Node through a callback, in a workspace whose release profile aborts first), judged real",
+        exceptions: "",
         sources: &[
             "Cargo Book, Profiles, `panic` (\"Tests, benchmarks, build scripts, and proc macros ignore the `panic` setting\"; \"Cargo only looks at the profile settings in the `Cargo.toml` manifest at the root of the workspace\"): https://doc.rust-lang.org/cargo/reference/profiles.html#panic",
             "std::panic::catch_unwind, Notes (\"This function only catches unwinding panics, not those that abort the process\"): https://doc.rust-lang.org/std/panic/fn.catch_unwind.html#notes",
@@ -202,6 +221,7 @@ static RULES: &[Rule] = &[
                           `&raw mut` access still says that in the code.",
         evidence: Evidence::Demonstrated,
         precision: "10 of 10 deliberate (Python FFI tables, an atomic-guarded global); no data race found",
+        exceptions: "",
         sources: &[
             "Edition Guide, static mut references: https://doc.rust-lang.org/edition-guide/rust-2024/static-mut-references.html",
             "experiments/miri: bad_static_mut_race (UB) vs good_atomic_counter (clean)",
@@ -219,6 +239,7 @@ static RULES: &[Rule] = &[
                           form, isn't flagged.",
         evidence: Evidence::Demonstrated,
         precision: "no instances in the corpus",
+        exceptions: "",
         sources: &[
             "std::mem::uninitialized: https://doc.rust-lang.org/std/mem/fn.uninitialized.html",
             "std::mem::MaybeUninit, initialization invariant: https://doc.rust-lang.org/std/mem/union.MaybeUninit.html",
@@ -239,6 +260,7 @@ static RULES: &[Rule] = &[
                           group of `unsafe impl`s).",
         evidence: Evidence::Consensus,
         precision: "20 of 20 had no justification nearby; none was shown to be unsound",
+        exceptions: "",
         sources: &[
             "Clippy undocumented_unsafe_blocks (restriction): https://rust-lang.github.io/rust-clippy/master/index.html#undocumented_unsafe_blocks",
             "Standard library dev guide, safety comments: https://std-dev-guide.rust-lang.org/policy/safety-comments.html",
@@ -256,6 +278,7 @@ static RULES: &[Rule] = &[
         false_positives: "A `lock()` method on a type that isn't a lock. Guards moved elsewhere aren't tracked.",
         evidence: Evidence::Demonstrated,
         precision: "census, two raters (docs/AUDIT.md): 7 of 7 really hold a sync guard across `.await`, 0 of 7 can deadlock as written (nothing else takes the lock meanwhile); 6 were in tests",
+        exceptions: "",
         sources: &[
             "Clippy await_holding_lock (suspicious): https://rust-lang.github.io/rust-clippy/master/index.html#await_holding_lock",
             "Tokio Mutex docs, which mutex to use: https://docs.rs/tokio/latest/tokio/sync/struct.Mutex.html",
@@ -275,6 +298,7 @@ static RULES: &[Rule] = &[
                           (e.g. inside `spawn_blocking`), aren't flagged.",
         evidence: Evidence::Demonstrated,
         precision: "no instances outside tests in the corpus; all 10 in tests were deliberate, hence tests are exempt",
+        exceptions: "",
         sources: &[
             "Tokio, CPU-bound tasks and blocking code (\"blocking code that would otherwise block other tasks from running\"): https://docs.rs/tokio/latest/tokio/index.html#cpu-bound-tasks-and-blocking-code",
             "Alice Ryhl (Tokio maintainer), Async: What is blocking?: https://ryhl.io/blog/async-what-is-blocking/",
@@ -294,6 +318,7 @@ static RULES: &[Rule] = &[
                           aren't flagged.",
         evidence: Evidence::Demonstrated,
         precision: "census, two raters (docs/AUDIT.md): 7 of 16 hid a failed flush, write or sync from a caller expecting an error; the rest were deliberate best-effort writes, writes on an error path, or test doubles",
+        exceptions: "",
         sources: &[
             "CWE-252 Unchecked Return Value: https://cwe.mitre.org/data/definitions/252.html",
             "Yuan et al., Simple Testing Can Prevent Most Critical Failures, OSDI 2014: https://www.usenix.org/conference/osdi14/technical-sessions/presentation/yuan",
@@ -313,6 +338,7 @@ static RULES: &[Rule] = &[
         false_positives: "A library that is really a CLI's internals, exiting before any buffered state exists.",
         evidence: Evidence::Demonstrated,
         precision: "10 of 10 a library crate exiting for its caller; none lost data (all CLI paths before any buffered state)",
+        exceptions: "",
         sources: &[
             "std::process::exit: https://doc.rust-lang.org/std/process/fn.exit.html",
             "experiments/tests/io.rs: process_exit_skips_destructors",
@@ -329,6 +355,7 @@ static RULES: &[Rule] = &[
         false_positives: "Comparing against a value stored from the same literal (a sentinel).",
         evidence: Evidence::Demonstrated,
         precision: "no instances in the corpus",
+        exceptions: "",
         sources: &[
             "Goldberg, What Every Computer Scientist Should Know About Floating-Point Arithmetic (1991): https://docs.oracle.com/cd/E19957-01/806-3568/ncg_goldberg.html",
             "experiments/tests/numeric.rs: inexact_literals_break_equality",
@@ -345,6 +372,7 @@ static RULES: &[Rule] = &[
         false_positives: "Lengths bounded by construction. `try_from` documents and checks it.",
         evidence: Evidence::Demonstrated,
         precision: "first audit: 0 of 20 shown reachable; lengths were bounded by their domain",
+        exceptions: "",
         sources: &[
             "Rust Reference, numeric cast semantics: https://doc.rust-lang.org/reference/expressions/operator-expr.html#numeric-cast",
             "CWE-197 Numeric Truncation Error: https://cwe.mitre.org/data/definitions/197.html",
@@ -363,6 +391,7 @@ static RULES: &[Rule] = &[
                           Examples, tests and benches aren't flagged.",
         evidence: Evidence::Demonstrated,
         precision: "no instances in shipping crate roots; all 31 were in examples, tests or benches, which are exempt",
+        exceptions: "",
         sources: &[
             "Rust Design Patterns, #![deny(warnings)] anti-pattern: https://rust-unofficial.github.io/patterns/anti_patterns/deny-warnings.html",
             "RFC 1105, API evolution (new lints are minor changes): https://rust-lang.github.io/rfcs/1105-api-evolution.html",

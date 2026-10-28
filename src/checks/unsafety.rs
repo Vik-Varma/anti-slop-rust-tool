@@ -69,10 +69,26 @@ fn holds_maybe_uninit(path: &syn::Path) -> bool {
     })
 }
 
-pub fn unsafe_block(a: &mut Analyzer, node: &syn::ExprUnsafe) {
+/// The comment justifying an `unsafe` block, if there is one: see `safety_comment`, plus the
+/// block's own first line (`unsafe {\n // why\n`).
+pub fn block_justification<'a>(a: &Analyzer<'a>, node: &syn::ExprUnsafe) -> Option<&'a Line> {
     let line = node.unsafe_token.span().start().line;
     let first_inner = node.block.brace_token.span.open().start().line + 1;
-    if has_safety_comment(a, line) || justifies(a.comments.get(first_inner - 1)) {
+    safety_comment(a, line).or_else(|| {
+        a.comments
+            .get(first_inner - 1)
+            .filter(|l| justifies(Some(l)))
+    })
+}
+
+/// The comment justifying an `unsafe impl`, if there is one.
+pub fn impl_justification<'a>(a: &Analyzer<'a>, node: &syn::ItemImpl) -> Option<&'a Line> {
+    let token = node.unsafety.as_ref()?;
+    safety_comment(a, token.span().start().line)
+}
+
+pub fn unsafe_block(a: &mut Analyzer, node: &syn::ExprUnsafe) {
+    if block_justification(a, node).is_some() {
         return;
     }
     a.emit(
@@ -84,7 +100,7 @@ pub fn unsafe_block(a: &mut Analyzer, node: &syn::ExprUnsafe) {
 
 pub fn unsafe_impl(a: &mut Analyzer, node: &syn::ItemImpl) {
     let Some(token) = &node.unsafety else { return };
-    if has_safety_comment(a, token.span().start().line) {
+    if impl_justification(a, node).is_some() {
         return;
     }
     a.emit(
@@ -105,23 +121,24 @@ fn justifies(line: Option<&Line>) -> bool {
 /// line. Any wording counts. The std library writes `// SAFETY:`, but the audit in
 /// docs/EVIDENCE.md found real justifications in other words, and the rule is about there being
 /// an argument at all.
-fn has_safety_comment(a: &Analyzer, line: usize) -> bool {
-    let info = |n: usize| if n == 0 { None } else { a.comments.get(n - 1) };
-    if justifies(info(line)) {
-        return true;
+fn safety_comment<'a>(a: &Analyzer<'a>, line: usize) -> Option<&'a Line> {
+    let (comments, lines) = (a.comments, a.lines);
+    let info = |n: usize| if n == 0 { None } else { comments.get(n - 1) };
+    if let Some(l) = info(line).filter(|l| justifies(Some(l))) {
+        return Some(l);
     }
     let mut n = line.saturating_sub(1);
     let mut stepped_over_code = false;
     while n > 0 {
-        let Some(l) = info(n) else { return false };
-        let text = a.lines.get(n - 1).map(|t| t.trim()).unwrap_or_default();
+        let l = info(n)?;
+        let text = lines.get(n - 1).map(|t| t.trim()).unwrap_or_default();
         if l.only_comment() {
             if !l.doc {
-                return true;
+                return Some(l);
             }
         } else if text.starts_with("#[") {
             if justifies(Some(l)) {
-                return true;
+                return Some(l);
             }
         } else if !stepped_over_code
             && l.code
@@ -130,12 +147,12 @@ fn has_safety_comment(a: &Analyzer, line: usize) -> bool {
             // The first line of a statement that continues onto the `unsafe` line.
             stepped_over_code = true;
             if justifies(Some(l)) {
-                return true;
+                return Some(l);
             }
         } else {
-            return false;
+            return None;
         }
         n -= 1;
     }
-    false
+    None
 }

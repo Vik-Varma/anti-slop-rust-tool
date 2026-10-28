@@ -7,7 +7,8 @@ mod errors;
 mod hygiene;
 mod numeric;
 mod panics;
-mod unsafety;
+pub mod style;
+pub(crate) mod unsafety;
 
 use syn::punctuated::Punctuated;
 
@@ -15,6 +16,7 @@ use crate::analyzer::Analyzer;
 
 pub fn file_level(a: &mut Analyzer, file: &syn::File) {
     hygiene::file_attributes(a, &file.attrs);
+    style::file(a, file);
 }
 
 pub fn function(a: &mut Analyzer, sig: &syn::Signature, block: &syn::Block) {
@@ -31,6 +33,7 @@ pub use unsafety::is_maybe_uninit_array;
 
 pub fn item_impl(a: &mut Analyzer, node: &syn::ItemImpl) {
     unsafety::unsafe_impl(a, node);
+    style::unsafe_impl(a, node);
 }
 
 pub fn item_static(a: &mut Analyzer, node: &syn::ItemStatic) {
@@ -40,6 +43,7 @@ pub fn item_static(a: &mut Analyzer, node: &syn::ItemStatic) {
 pub fn method_call(a: &mut Analyzer, node: &syn::ExprMethodCall) {
     panics::method_call(a, node);
     unsafety::method_call(a, node);
+    style::method_call(a, node);
 }
 
 pub fn call(a: &mut Analyzer, node: &syn::ExprCall) {
@@ -47,10 +51,12 @@ pub fn call(a: &mut Analyzer, node: &syn::ExprCall) {
     unsafety::call(a, node);
     concurrency::call(a, node);
     errors::call(a, node);
+    style::call(a, node);
 }
 
 pub fn binary(a: &mut Analyzer, node: &syn::ExprBinary) {
     numeric::binary(a, node);
+    style::binary(a, node);
 }
 
 pub fn cast(a: &mut Analyzer, node: &syn::ExprCast) {
@@ -59,6 +65,7 @@ pub fn cast(a: &mut Analyzer, node: &syn::ExprCast) {
 
 pub fn unsafe_block(a: &mut Analyzer, node: &syn::ExprUnsafe) {
     unsafety::unsafe_block(a, node);
+    style::unsafe_block(a, node);
 }
 
 pub fn stmt(a: &mut Analyzer, node: &syn::Stmt) {
@@ -67,6 +74,31 @@ pub fn stmt(a: &mut Analyzer, node: &syn::Stmt) {
 
 pub fn macro_call(a: &mut Analyzer, node: &syn::Macro) {
     panics::macro_call(a, node);
+    style::macro_call(a, node);
+}
+
+pub fn item_use(a: &mut Analyzer, node: &syn::ItemUse) {
+    style::item_use(a, node);
+}
+
+pub fn path(a: &mut Analyzer, node: &syn::Path) {
+    style::path(a, node);
+}
+
+pub fn for_loop(a: &mut Analyzer, node: &syn::ExprForLoop) {
+    style::for_loop(a, node);
+}
+
+pub fn expr_match(a: &mut Analyzer, node: &syn::ExprMatch) {
+    style::expr_match(a, node);
+}
+
+pub fn expr_if(a: &mut Analyzer, node: &syn::ExprIf) {
+    style::expr_if(a, node);
+}
+
+pub fn local(a: &mut Analyzer, node: &syn::Local) {
+    style::local(a, node);
 }
 
 /// Macros whose input is a comma-separated list of expressions. Code inside them is real code,

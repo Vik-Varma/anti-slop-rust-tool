@@ -3,7 +3,7 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use anti_slop::{Finding, Severity, analyze_paths, rules};
+use anti_slop::{Finding, Severity, analyze_paths_with, rules};
 
 const USAGE: &str = "\
 anti-slop: find Rust code that is bad by an evidence-backed definition
@@ -17,8 +17,9 @@ USAGE:
 
 OPTIONS:
     --format text|json        output format (default text)
-    --min-severity LEVEL      note, warning or error (default warning; notes are
-                              real but usually deliberate, see `anti-slop rules`)
+    --min-severity LEVEL      style, note, warning or error (default warning; notes
+                              are real but usually deliberate; style rules are Google's
+                              Rust style guide, see `anti-slop rules`)
     --only RULE[,RULE]        run only these rules
     --skip RULE[,RULE]        don't report these rules
 
@@ -155,7 +156,9 @@ fn main() -> ExitCode {
 
 fn list_rules() -> Result<ExitCode, Error> {
     let mut out = io::stdout().lock();
-    for r in rules::all() {
+    let (style, evidence): (Vec<_>, Vec<_>) =
+        rules::all().partition(|r| r.severity == Severity::Style);
+    for r in evidence {
         writeln!(
             out,
             "{:<32} {:<8} {:<16} {}",
@@ -164,6 +167,13 @@ fn list_rules() -> Result<ExitCode, Error> {
             r.category.as_str(),
             r.summary
         )?;
+    }
+    writeln!(
+        out,
+        "\nStyle rules, from Google's Rust style guide (`--min-severity style`; preferences, not defects):"
+    )?;
+    for r in style {
+        writeln!(out, "{:<32} {}", r.id, r.summary)?;
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -185,18 +195,32 @@ fn explain(id: Option<&String>) -> Result<ExitCode, Error> {
     for s in r.sources {
         text.push_str(&format!("  - {s}\n"));
     }
+    if !r.exceptions.is_empty() {
+        text.push_str(&format!(
+            "\nExceptions the source lists: {}\n",
+            r.exceptions
+        ));
+    }
     io::stdout().lock().write_all(text.as_bytes())?;
     Ok(ExitCode::SUCCESS)
 }
 
 fn keep(o: &Options, f: &Finding) -> bool {
-    f.severity >= o.min_severity
+    (f.severity >= o.min_severity || o.only.iter().any(|r| r == f.rule))
         && (o.only.is_empty() || o.only.iter().any(|r| r == f.rule))
         && !o.skip.iter().any(|r| r == f.rule)
 }
 
+/// The style rules run only when they can be shown: at `--min-severity style`, or named by `--only`.
+fn wants_style(o: &Options) -> bool {
+    o.min_severity == Severity::Style
+        || o.only
+            .iter()
+            .any(|id| rules::get(id).is_some_and(|r| r.severity == Severity::Style))
+}
+
 fn check(o: &Options) -> Result<ExitCode, Error> {
-    let (reports, errors) = analyze_paths(&o.paths);
+    let (reports, errors) = analyze_paths_with(&o.paths, wants_style(o));
     let findings: Vec<&Finding> = reports
         .iter()
         .flat_map(|(_, r)| &r.findings)
@@ -315,7 +339,8 @@ fn function_rows(
             ("f_comment_lines", f.comment_lines),
         ];
         row.extend(numbers.iter().map(|(k, v)| (k.to_string(), v.to_string())));
-        for r in rules::all() {
+        // Style rules aren't counted: they're preferences, and the study's columns predate them.
+        for r in rules::all().filter(|r| r.severity != Severity::Style) {
             // By the function the finding was emitted in, so nested functions don't count twice.
             let n = report
                 .findings
@@ -330,7 +355,7 @@ fn function_rows(
 }
 
 fn metrics(o: &Options) -> Result<ExitCode, Error> {
-    let (reports, errors) = analyze_paths(&o.paths);
+    let (reports, errors) = analyze_paths_with(&o.paths, false);
     let csv = o.format != "json";
     let mut out = io::stdout().lock();
     let mut first = true;

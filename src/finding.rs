@@ -4,6 +4,8 @@ use std::path::PathBuf;
 /// How sure we are that a finding is a real defect, and how much it costs if it is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Severity {
+    /// A style guide's preference, with no failure behind it. Off unless asked for.
+    Style,
     /// Worth a look in review; the evidence says it raises risk, not that it is wrong.
     Note,
     /// A demonstrated failure mode that needs a reason to stay.
@@ -15,6 +17,7 @@ pub enum Severity {
 impl Severity {
     pub fn as_str(self) -> &'static str {
         match self {
+            Severity::Style => "style",
             Severity::Note => "note",
             Severity::Warning => "warning",
             Severity::Error => "error",
@@ -23,6 +26,7 @@ impl Severity {
 
     pub fn parse(s: &str) -> Option<Severity> {
         match s {
+            "style" => Some(Severity::Style),
             "note" => Some(Severity::Note),
             "warning" => Some(Severity::Warning),
             "error" => Some(Severity::Error),

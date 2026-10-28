@@ -109,7 +109,7 @@ pub fn method_call(a: &mut Analyzer, node: &syn::ExprMethodCall) {
     let (test, in_drop, in_const) = (scope.test, scope.in_drop, scope.in_const);
     let method = node.method.to_string();
     if method == "catch_unwind" && node.args.is_empty() {
-        catch_unwind(a, node.method.span()); // futures' `FutureExt::catch_unwind`
+        report_catch_unwind(a, node.method.span()); // futures' `FutureExt::catch_unwind`
         return;
     }
     if test || in_const || !(method == "unwrap" && node.args.is_empty() || method == "expect") {
@@ -202,10 +202,10 @@ pub fn call(a: &mut Analyzer, node: &syn::ExprCall) {
         .last()
         .map(|s| s.ident.span())
         .unwrap_or_else(proc_macro2::Span::call_site);
-    catch_unwind(a, span);
+    report_catch_unwind(a, span);
 }
 
-fn catch_unwind(a: &mut Analyzer, span: proc_macro2::Span) {
+fn report_catch_unwind(a: &mut Analyzer, span: proc_macro2::Span) {
     if a.scope().test || a.abort_profiles.is_empty() {
         return;
     }

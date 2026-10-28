@@ -90,6 +90,23 @@ verdicts:
 Tests, examples, benches, build scripts, `#[cfg(test)]` modules (including those in their own
 files), test-support crates and `xtask` crates aren't judged as shipping code.
 
+### Style rules (opt in)
+
+```sh
+anti-slop --min-severity style path     # also Google's Rust style guide, as 39 rules
+anti-slop --only glob-import,bool-parameter path
+anti-slop explain non-exhaustive-missing   # the guide's reason, and the exceptions it lists
+```
+
+These are a different kind of thing from the rules above: preferences from
+[Google's Rust style guide](https://google.github.io/styleguide/rustguide.html), with no failure
+behind them, so they're not "bad code" by this tool's definition and never show by default. Each
+one quotes the guide's reason, honours the exceptions the guide lists where syntax can tell
+(`use super::*` in an inline test module, a commented `bool` parameter, a two-state enum without
+`#[non_exhaustive]`), and names the ones that need a suppression comment instead. Rules the guide
+tags as one codebase's policy ([chrome], [Fuchsia]) aren't included. The list, with how often
+each fires on real code, is in [docs/STYLE.md](docs/STYLE.md).
+
 ## Reproduce
 
 ```sh

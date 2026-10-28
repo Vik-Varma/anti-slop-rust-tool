@@ -61,6 +61,7 @@ pub fn analyze_source_in(
         kind,
         abort_profiles: options.abort_profiles,
         style: options.style,
+        style_file: Default::default(),
         lines: &lines,
         suppressions: Suppressions::parse(&comments),
         comments: &comments,
@@ -130,6 +131,8 @@ pub struct Analyzer<'a> {
     pub abort_profiles: Vec<String>,
     /// Whether the style rules run (`Options::style`).
     pub style: bool,
+    /// What the style rules' file-level pass learned, for their expression hooks.
+    pub style_file: checks::style::StyleFile,
     pub lines: &'a [&'a str],
     /// The comments on each line, from `crate::comments`.
     pub comments: &'a [crate::comments::Line],
@@ -185,6 +188,7 @@ impl Analyzer<'_> {
         let parent = self.scope();
         Scope {
             test: parent.test || is_test_item(attrs),
+            inline_mod: parent.inline_mod,
             in_async: sig.asyncness.is_some(),
             in_drop: false,
             // A `const fn` called at run time is ordinary code, so its panics are real.
@@ -208,6 +212,8 @@ impl Analyzer<'_> {
         let outer_types = std::mem::take(&mut self.self_types);
         self.with_scope(scope, |a| {
             checks::function(a, sig, block);
+            // The signature too, for paths and types in it; it holds no statements.
+            a.visit_signature(sig);
             a.visit_block(block);
         });
         self.self_types = outer_types;
@@ -286,6 +292,7 @@ impl<'ast> Visit<'ast> for Analyzer<'_> {
         let parent = self.scope().clone();
         let scope = Scope {
             test: parent.test || is_test_item(&node.attrs),
+            inline_mod: node.content.is_some(),
             ..parent
         };
         self.with_scope(scope, |a| visit::visit_item_mod(a, node));
@@ -298,6 +305,12 @@ impl<'ast> Visit<'ast> for Analyzer<'_> {
 
     fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
         checks::item_impl(self, node);
+        // The header (generics, trait, self type) holds paths the style rules read.
+        self.visit_generics(&node.generics);
+        if let Some((_, path, _)) = &node.trait_ {
+            self.visit_path(path);
+        }
+        self.visit_type(&node.self_ty);
         let parent = self.scope().clone();
         let is_drop = node
             .trait_
@@ -416,7 +429,28 @@ impl<'ast> Visit<'ast> for Analyzer<'_> {
         });
     }
 
+    fn visit_item_use(&mut self, node: &'ast syn::ItemUse) {
+        checks::item_use(self, node);
+        visit::visit_item_use(self, node);
+    }
+
+    fn visit_path(&mut self, node: &'ast syn::Path) {
+        checks::path(self, node);
+        visit::visit_path(self, node);
+    }
+
+    fn visit_expr_for_loop(&mut self, node: &'ast syn::ExprForLoop) {
+        checks::for_loop(self, node);
+        visit::visit_expr_for_loop(self, node);
+    }
+
+    fn visit_expr_match(&mut self, node: &'ast syn::ExprMatch) {
+        checks::expr_match(self, node);
+        visit::visit_expr_match(self, node);
+    }
+
     fn visit_expr_if(&mut self, node: &'ast syn::ExprIf) {
+        checks::expr_if(self, node);
         // `if !thread::panicking() { panic!(..) }` in a destructor is the correct way to do it.
         if self.scope().in_drop
             && let Some(guarded_then) = checks::panicking_guard(&node.cond)
@@ -463,6 +497,7 @@ impl<'ast> Visit<'ast> for Analyzer<'_> {
     }
 
     fn visit_local(&mut self, node: &'ast syn::Local) {
+        checks::local(self, node);
         if let syn::Pat::Type(t) = &node.pat
             && checks::is_maybe_uninit_array(&t.ty)
         {

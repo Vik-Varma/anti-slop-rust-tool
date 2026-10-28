@@ -79,6 +79,8 @@ fn is_test_dir(d: &str) -> bool {
 pub struct Scope {
     /// Inside `#[test]`, `#[cfg(test)]` or a test-only file.
     pub test: bool,
+    /// Inside `mod x { .. }` written out in this file, as opposed to `mod x;`.
+    pub inline_mod: bool,
     /// Inside an `async fn` or `async` block, and not in a nested sync closure or fn.
     pub in_async: bool,
     /// Inside `impl Drop for T { fn drop }`.

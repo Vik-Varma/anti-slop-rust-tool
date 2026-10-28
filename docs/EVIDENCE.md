@@ -207,7 +207,7 @@ preferences, which `docs/STYLE.md` covers.
 Every web page cited by a rule or in these docs was fetched on 2026-10-26 (2026-10-27 for Google's
 guide, the Cargo Book and the `catch_unwind` and `Mutex` pages), and the claim it is cited for was
 found in its text. `study/check_sources.py` repeats the check (a regex per claim)
-and exits non-zero if any claim has gone missing: 38 claims on 25 pages plus the six Clippy lint groups,
+and exits non-zero if any claim has gone missing: 54 claims on 29 pages plus the six Clippy lint groups,
 none missing. Two corrections came out of that check. The Book's "in production-quality code,
 most Rustaceans choose `expect` rather than `unwrap`" is in chapter 9.2, not 9.3. And Rust 2024
 makes `static_mut_refs` *deny by default*, a lint that can be allowed, not a hard error.

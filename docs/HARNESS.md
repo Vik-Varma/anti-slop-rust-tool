@@ -159,6 +159,10 @@ to the job summary:
   with: { base: "${{ github.event.pull_request.base.sha }}" }
 ```
 
+**A `CLAUDE.md` for the project.** `templates/CLAUDE.md` is a 250-word instruction file for a
+repository that uses the harness: how to run it, how to read it, and the four rules that keep an
+agent from passing the check instead of the task. Copy it in and set the base branch.
+
 **Beside other agent tooling.** [Token Optimizer](https://github.com/alexgreensh/token-optimizer)
 compresses recognised commands' output; the harness output is already compact, so leave
 `anti-slop` out of its compression (`[filters.exclude] commands = ["anti-slop"]`) rather than let

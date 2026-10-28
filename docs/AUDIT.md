@@ -44,6 +44,7 @@ Rules judged in earlier rounds by rater 1 only:
 | mem-forget (dropped) | 40 | 0 / 10 | 1 | dropped |
 | uninit-memory, float-eq-inexact | 0 | no instances | n/a | error, warning |
 | blocking-sleep-in-async, deny-warnings | 0 in shipping code | all were in tests or examples, which are now exempt | 1 | warning |
+| catch-unwind-under-panic-abort | 1 (a second, in a proc-macro crate, is exempt) | 1 / 1: tauri @ 1fc6d9c85c `packages/cli/src/lib.rs:23` reports a CLI panic to Node through a callback that the workspace's `[profile.release] panic = "abort"` never lets run | 5 | warning |
 
 ## Round 5: census
 

@@ -3,8 +3,8 @@
 A Rust linter that only calls code bad when there's evidence it is.
 
 Most "bad code" advice is taste or folklore. This tool started from the opposite end. It gathered
-the claims trusted sources make (the Rust Book, std docs, Clippy, Tokio, CWE, the research
-literature), then tested each one:
+the claims trusted sources make (the Rust Book, std docs, the Cargo Book, Clippy, Tokio, Google's
+Rust style guide, CWE, the research literature), then tested each one:
 
 - **Does the failure actually happen?** Each claim has a program in `experiments/` that
   reproduces it: panics, process aborts, a deadlock, a stalled executor, data silently lost,
@@ -62,10 +62,12 @@ Shown by default:
 | `blocking-sleep-in-async` | warning | `thread::sleep` in async code | other tasks get 0 turns during the sleep |
 | `float-eq-inexact` | warning | `x == 0.1` (literals with no exact binary value) | `0.1 + 0.2 != 0.3`; exact literals are left alone |
 | `deny-warnings` | warning | `#![deny(warnings)]` in a crate root | builds on Rust 1.76, fails on 1.99 |
+| `catch-unwind-under-panic-abort` | warning | `catch_unwind` in a workspace whose profile sets `panic = "abort"` | the process dies at the panic and the `Err` arm never runs; tests still unwind, so they pass |
 
-Each of these four flags exactly the construct its experiment shows failing, so a finding is the
-real thing. Mature projects don't contain them: on the 37 audited codebases, the default run
-reports nothing.
+Each of these five flags exactly the construct its experiment shows failing, so a finding is the
+real thing. Mature projects rarely contain them: on the 37 audited codebases, the default run
+reports one finding (tauri's CLI, which reports a panic to Node through a callback its release
+profile never lets run).
 
 Notes (`--min-severity note`). Each mechanism is real and reproduced, but in a two-rater audit most
 findings were guarded by something a syntax check can't see, so they're review prompts rather than

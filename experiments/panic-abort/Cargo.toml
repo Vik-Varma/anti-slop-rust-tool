@@ -1,0 +1,13 @@
+# A separate package, not a member of the experiments workspace, because `panic` is read from
+# the workspace root only and tests always unwind: the only way to observe `panic = "abort"` is
+# to build and run a binary under it. tests/panics.rs does that with `cargo run`.
+[package]
+name = "catch-unwind-under-abort"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[profile.dev]
+panic = "abort"

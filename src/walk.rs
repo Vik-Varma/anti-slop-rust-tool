@@ -3,9 +3,10 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::analyzer::{FileReport, analyze_source_as};
+use crate::analyzer::{FileReport, Options, analyze_source_in};
 use crate::context::FileKind;
 use crate::layout;
+use crate::manifest;
 
 /// Directories that are never code under review.
 const SKIP_DIRS: &[&str] = &[".git", "node_modules", ".cargo"];
@@ -86,10 +87,20 @@ pub fn rust_files(root: &Path) -> io::Result<Vec<PathBuf>> {
 /// Analyses every Rust file under each path. Files that can't be read or parsed are returned as
 /// errors alongside the reports for the rest.
 pub fn analyze_paths(paths: &[PathBuf]) -> (Vec<(PathBuf, FileReport)>, Vec<AnalyzeError>) {
+    analyze_paths_with(paths, false)
+}
+
+/// As [`analyze_paths`]; `style` also runs the style rules.
+pub fn analyze_paths_with(
+    paths: &[PathBuf],
+    style: bool,
+) -> (Vec<(PathBuf, FileReport)>, Vec<AnalyzeError>) {
     let mut reports = Vec::new();
     let mut errors = Vec::new();
     // `anti-slop . src src/lib.rs` names one file three times; analyse it once.
     let mut seen = std::collections::HashSet::new();
+    // Profiles are per package, and most files share one.
+    let mut manifests = std::collections::HashMap::new();
     for root in paths {
         let files = match rust_files(root) {
             Ok(f) => f,
@@ -117,10 +128,16 @@ pub fn analyze_paths(paths: &[PathBuf]) -> (Vec<(PathBuf, FileReport)>, Vec<Anal
                 .copied()
                 .unwrap_or_else(|| FileKind::of(&file));
             match fs::read_to_string(&file) {
-                Ok(src) => match analyze_source_as(&file, &src, kind) {
-                    Ok(report) => reports.push((file, report)),
-                    Err(e) => errors.push(AnalyzeError::Parse(file, e)),
-                },
+                Ok(src) => {
+                    let options = Options {
+                        abort_profiles: manifest::abort_profiles(&file, &mut manifests),
+                        style,
+                    };
+                    match analyze_source_in(&file, &src, kind, options) {
+                        Ok(report) => reports.push((file, report)),
+                        Err(e) => errors.push(AnalyzeError::Parse(file, e)),
+                    }
+                }
                 Err(e) => errors.push(AnalyzeError::Io(file, e)),
             }
         }

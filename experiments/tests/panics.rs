@@ -1,4 +1,4 @@
-//! `unwrap`, `todo`, `panic-in-drop`.
+//! `unwrap`, `todo`, `panic-in-drop`, `catch-unwind-under-panic-abort`.
 
 use std::panic;
 
@@ -63,4 +63,31 @@ fn panic_in_drop_during_unwind_aborts() {
         use std::os::unix::process::ExitStatusExt;
         assert_eq!(out.status.signal(), Some(6), "SIGABRT, not an ordinary exit");
     }
+}
+
+/// `catch_unwind` under `panic = "abort"` (the profile in panic-abort/Cargo.toml): the process
+/// aborts at the panic and the `Err` arm never runs. The same source under `unwind` recovers.
+/// Tests always unwind, so this has to build and run a binary.
+#[test]
+fn catch_unwind_does_not_catch_under_panic_abort() {
+    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
+    let manifest = concat!(env!("CARGO_MANIFEST_DIR"), "/panic-abort/Cargo.toml");
+    let run = |config: &[&str]| {
+        std::process::Command::new(&cargo)
+            .args(["run", "--quiet", "--manifest-path", manifest])
+            .args(config)
+            .output()
+            .expect("cargo runs")
+    };
+    let abort = run(&[]);
+    assert!(!abort.status.success(), "the process died at the panic: {:?}", abort.status);
+    assert!(!String::from_utf8_lossy(&abort.stdout).contains("recovered"), "the Err arm never ran");
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        assert_eq!(abort.status.signal(), Some(6), "SIGABRT, not an ordinary exit");
+    }
+    let unwind = run(&["--config", "profile.dev.panic=\"unwind\""]);
+    assert!(unwind.status.success(), "{}", String::from_utf8_lossy(&unwind.stderr));
+    assert!(String::from_utf8_lossy(&unwind.stdout).contains("recovered"), "same source, unwinding: the arm runs");
 }

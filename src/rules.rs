@@ -73,6 +73,8 @@ pub fn get(id: &str) -> Option<&'static Rule> {
 const BOOK_PANIC: &str = "Rust Book ch. 9.3, To panic! or Not to panic!: https://doc.rust-lang.org/book/ch09-03-to-panic-or-not-to-panic.html";
 const BOOK_EXPECT: &str = "Rust Book ch. 9.2 (\"In production-quality code, most Rustaceans choose expect rather than unwrap\"): https://doc.rust-lang.org/book/ch09-02-recoverable-errors-with-result.html";
 const API_DTOR: &str = "Rust API Guidelines C-DTOR-FAIL, destructors never fail: https://rust-lang.github.io/api-guidelines/dependability.html#c-dtor-fail";
+const GOOGLE_PANIC: &str = "Google Rust style guide, Reporting errors (\"Use `panic!` to report bugs and violated invariants\"; recoverable failures are `Result`): https://google.github.io/styleguide/rustguide.html";
+const GOOGLE_EXPECT: &str = "Google Rust style guide, Prefer `expect` over `unwrap` (\"to document the reason\"): https://google.github.io/styleguide/rustguide.html";
 
 static RULES: &[Rule] = &[
     Rule {
@@ -90,6 +92,7 @@ static RULES: &[Rule] = &[
         sources: &[
             BOOK_PANIC,
             BOOK_EXPECT,
+            GOOGLE_PANIC,
             "Cloudflare, 18 November 2025 outage: https://blog.cloudflare.com/18-november-2025-outage/",
             "experiments/tests/panics.rs: unwrap_panics_without_context, a_panic_poisons_shared_state",
         ],
@@ -113,6 +116,7 @@ static RULES: &[Rule] = &[
         sources: &[
             BOOK_PANIC,
             BOOK_EXPECT,
+            GOOGLE_EXPECT,
             "Clippy unwrap_used (restriction): https://rust-lang.github.io/rust-clippy/master/index.html#unwrap_used",
             "study/results.md, study/replication.md: H7",
         ],
@@ -169,6 +173,22 @@ static RULES: &[Rule] = &[
         ],
     },
     Rule {
+        id: "catch-unwind-under-panic-abort",
+        category: Category::Correctness,
+        severity: Severity::Warning,
+        summary: "`catch_unwind` in a package whose workspace profile sets `panic = \"abort\"`",
+        harm: "With `panic = \"abort\"` the process ends at the panic, so `catch_unwind` never returns `Err` and whatever that arm was for (an error report, a fallback, a cleanup) doesn't happen. A test suite can't show it: Cargo builds tests with unwinding whatever the profile says, so the arm runs under `cargo test` and never in the shipped binary.",
+        false_positives: "The strategy is read as Cargo reads it, from the workspace root's Cargo.toml and a `.cargo/config.toml` beside it; a config file elsewhere, a `CARGO_PROFILE_*_PANIC` variable or a `--config` flag can change it and isn't seen. Proc-macro crates, build scripts and tests are exempt, as Cargo ignores the setting for them. A `catch_unwind` kept only as defence in depth that nothing relies on is still flagged, since it still can't run.",
+        evidence: Evidence::Demonstrated,
+        precision: "exact by construction given the profile; 1 instance in the corpus (tauri's `packages/cli` reports a CLI panic to Node through a callback, in a workspace whose release profile aborts first), judged real",
+        sources: &[
+            "Cargo Book, Profiles, `panic` (\"Tests, benchmarks, build scripts, and proc macros ignore the `panic` setting\"; \"Cargo only looks at the profile settings in the `Cargo.toml` manifest at the root of the workspace\"): https://doc.rust-lang.org/cargo/reference/profiles.html#panic",
+            "std::panic::catch_unwind, Notes (\"This function only catches unwinding panics, not those that abort the process\"): https://doc.rust-lang.org/std/panic/fn.catch_unwind.html#notes",
+            "Google Rust style guide, Don't call `panic::catch_unwind` (\"will only function correctly in environments with `panic=unwind`\"; Chrome, Android and Fuchsia build with `panic=abort`): https://google.github.io/styleguide/rustguide.html",
+            "experiments/panic-abort, run by experiments/tests/panics.rs: catch_unwind_does_not_catch_under_panic_abort",
+        ],
+    },
+    Rule {
         id: "static-mut",
         category: Category::Correctness,
         severity: Severity::Note,
@@ -222,6 +242,7 @@ static RULES: &[Rule] = &[
         sources: &[
             "Clippy undocumented_unsafe_blocks (restriction): https://rust-lang.github.io/rust-clippy/master/index.html#undocumented_unsafe_blocks",
             "Standard library dev guide, safety comments: https://std-dev-guide.rust-lang.org/policy/safety-comments.html",
+            "Google Rust style guide, Unsafe code (\"Add a safety comment starting with `SAFETY:` that explains why the code is correct\"): https://google.github.io/styleguide/rustguide.html",
         ],
     },
     Rule {

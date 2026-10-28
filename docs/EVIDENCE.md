@@ -36,6 +36,7 @@ the pattern at all.
 | `blocking-sleep-in-async` | `thread::sleep` stalls the executor | a 5 ms ticker runs 0 times during a 200 ms `thread::sleep` and keeps ticking during `tokio::time::sleep` (current-thread runtime) | 0 outside tests; all 10 in tests deliberate, so tests exempt | **warning** |
 | `float-eq-inexact` | `==` with an inexact literal is unreliable | `0.1 + 0.2 != 0.3`; `0.25 + 0.25 == 0.5` | no instances | **warning** (exact literals not flagged) |
 | `deny-warnings` | `#![deny(warnings)]` breaks on newer compilers | same file builds on 1.76, fails on 1.99 (`static_mut_refs`) | 0 in crate roots; 31 in examples/tests/benches, now exempt | **warning** |
+| `catch-unwind-under-panic-abort` | `catch_unwind` can't catch when the profile aborts on panic (Google's reason for banning it; Cargo and std document the mechanism) | `experiments/panic-abort`: the same program exits 134 (SIGABRT) with `panic = "abort"` and prints `recovered` with `unwind`; Cargo ignores the setting for tests, so `cargo test` can't show it | 1 instance in shipping code (tauri's CLI: a panic report to Node that its release profile never delivers), judged real; a second in a proc-macro crate is exempt, since Cargo builds those with unwinding | **warning** (exact given the profile) |
 | `panic-on-input` | unwrap on parse/IO/env results crashes on bad input | `unwrap` panics without context, and a panic poisons shared locks; Cloudflare's 18 Nov 2025 outage (unwrap on an `Err` after a generated file exceeded 200 features) | 5/20 crash on real external input | **note** |
 | `panic-in-drop` | Panicking in `Drop` during unwinding aborts | SIGABRT, "panic in a destructor during cleanup"; `catch_unwind` never runs | 1/10 can realistically fire | **note** |
 | `ignored-io-error` | `let _ =` on a write loses data silently | `/dev/full`: `write_all` returns ENOSPC, the ignoring caller reports success; `BufWriter` drop swallows the error | 7/16 hid a failure from a caller expecting errors (census) | **note** |
@@ -127,6 +128,27 @@ handler in only 2% of the catastrophic failures they studied.
 Full tables, including the flexible-size and changed-functions-only robustness checks, are in
 `study/results.md`, `study/sensitivity.md` and `study/antislop-phrases.md`.
 
+### Google's Rust style guide, claim by claim
+
+The guide (https://google.github.io/styleguide/rustguide.html, undated; binding for Android,
+Chromium and Fuchsia library code) was read in full and each rule sorted by the reason it gives.
+One names a failure that reproduces; three agree with rules already here; the rest are
+preferences, which `docs/STYLE.md` covers.
+
+| Guide rule | Reason the guide gives | Here |
+|---|---|---|
+| Don't call `panic::catch_unwind` | "will only function correctly in environments with `panic=unwind`"; Chrome, Android and Fuchsia build with `panic=abort` | **adopted** as `catch-unwind-under-panic-abort` where the profile is visible (table above); the rest of the prohibition is the style rule `catch-unwind` |
+| Unsafe code: a `SAFETY:` comment and a justification | none beyond review | already `unsafe-without-comment`; the guide is a third source. The `SAFETY:` wording itself is the style rule `safety-comment-prefix` |
+| Reporting errors: `panic!` for bugs and violated invariants, `Result` for recoverable failures | the API contract | agrees with `panic-on-input`; added as a source |
+| Prefer `expect` over `unwrap` | "to document the reason" | agrees with the Book; a source on `unwrap` |
+| Never reach inside a poisoned mutex | none given | **not a defect rule**: std calls poisoning "only advisory" and documents `PoisonError::into_inner` as the way to proceed; of 55 corpus uses, a sample of 10 were all deliberate (caches, counters, a lock released during cleanup, test fixtures). Kept as the style rule `poisoned-mutex-recovery` |
+| Prefer `enum` over `bool` parameters | readability | the study measured bool parameters: OR 1.24 [1.04, 1.48] discovery, 1.02 [0.81, 1.29] replication, not replicated. Style rule `bool-parameter` |
+| Avoid `.clone()` as a substitute for borrowing | cost | the study found no detectable effect of `.clone()` counts; needs types to check, so no rule |
+| `#[non_exhaustive]`, `const fn` only if it stays `const`, `#[must_use]` | API evolution: a later change breaks callers | library-design rules about who the callers are; the syntactic parts are style rules (`non-exhaustive-missing`, `must-use-missing`) |
+| No unstable features; no code before `main()` | none given | no failure to reproduce; style rules `unstable-feature` and `code-before-main` (0 and 0 instances in the corpus's shipping code) |
+| Imports, naming, macros, `Rc`/`Arc`, iterators, documentation, formatting, assertions, type inference | readability, consistency, tooling, allocation cost | style rules, each with the guide's listed exceptions, in `docs/STYLE.md` |
+| Rules tagged [chrome] or [Fuchsia] (small crates, flat layout, no `async`, no std threads, `fuchsia_sync::Mutex`, test frameworks) | one codebase's build policy | not rules: the guide itself scopes them to one codebase |
+
 ### Rules dropped after the audit
 
 | Candidate | Why it was dropped |
@@ -182,8 +204,9 @@ Full tables, including the flexible-size and changed-functions-only robustness c
 
 ## Sources and how they were checked
 
-Every web page cited by a rule or in these docs was fetched on 2026-10-26, and the claim it is
-cited for was found in its text. `study/check_sources.py` repeats the check (a regex per claim)
+Every web page cited by a rule or in these docs was fetched on 2026-10-26 (2026-10-27 for Google's
+guide, the Cargo Book and the `catch_unwind` and `Mutex` pages), and the claim it is cited for was
+found in its text. `study/check_sources.py` repeats the check (a regex per claim)
 and exits non-zero if any claim has gone missing: 38 claims on 25 pages plus the six Clippy lint groups,
 none missing. Two corrections came out of that check. The Book's "in production-quality code,
 most Rustaceans choose `expect` rather than `unwrap`" is in chapter 9.2, not 9.3. And Rust 2024

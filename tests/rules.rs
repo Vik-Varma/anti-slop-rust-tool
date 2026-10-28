@@ -462,3 +462,55 @@ fn a_checkout_inside_a_tests_directory_is_still_shipping_code() {
     assert_eq!(findings_in(&dir), ["lib.rs:todo"]);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// `catch-unwind-under-panic-abort` reads manifests, so this runs over crates on disk: a workspace
+/// whose release profile aborts (flagged in shipping code; not in tests, build scripts or a
+/// proc-macro member), a lone package with no such profile, and one whose `.cargo/config.toml`
+/// overrides the manifest back to unwinding.
+#[test]
+fn catch_unwind_under_panic_abort() {
+    use std::fs;
+    let cu = "let _ = std::panic::catch_unwind(|| ());";
+    let files = [
+        ("ws/Cargo.toml", "[workspace]\nmembers = [\"app\", \"pm\"]\n\n[profile.release]\npanic = \"abort\" # small binaries\n\n[profile.release.package.\"*\"]\nopt-level = 3\n".to_string()),
+        ("ws/app/Cargo.toml", "[package]\nname = \"app\"\nversion = \"0.0.0\"\n".to_string()),
+        ("ws/app/build.rs", format!("fn main() {{ {cu} }}\n")),
+        ("ws/app/src/lib.rs", format!("pub fn run() {{ {cu} }}\n#[cfg(test)]\nmod t {{ fn x() {{ {cu} }} }}\n")),
+        ("ws/app/src/main.rs", "fn main() { let _ = std::panic::catch_unwind(app::run); }\n".to_string()),
+        ("ws/app/tests/it.rs", format!("#[test]\nfn t() {{ {cu} }}\n")),
+        ("ws/pm/Cargo.toml", "[package]\nname = \"pm\"\nversion = \"0.0.0\"\n\n[lib]\nproc-macro = true\n".to_string()),
+        ("ws/pm/src/lib.rs", format!("pub fn guard() {{ {cu} }}\n")),
+        ("solo/Cargo.toml", "[package]\nname = \"solo\"\nversion = \"0.0.0\"\n".to_string()),
+        ("solo/src/lib.rs", format!("pub fn run() {{ {cu} }}\n")),
+        ("cfg/Cargo.toml", "[package]\nname = \"cfg\"\nversion = \"0.0.0\"\n\n[profile.release]\npanic = \"abort\"\n".to_string()),
+        ("cfg/.cargo/config.toml", "[profile.release]\npanic = \"unwind\"\n".to_string()),
+        ("cfg/src/lib.rs", format!("pub fn run() {{ {cu} }}\n")),
+    ];
+    let dir = std::env::temp_dir().join(format!("anti-slop-abort-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    for (path, body) in &files {
+        let p = dir.join(path);
+        fs::create_dir_all(p.parent().expect("parent")).expect("dir");
+        fs::write(p, body).expect("write");
+    }
+    let (reports, errors) = anti_slop::analyze_paths(std::slice::from_ref(&dir));
+    assert!(errors.is_empty(), "{errors:?}");
+    let mut found: Vec<(String, String)> = reports
+        .iter()
+        .flat_map(|(_, r)| &r.findings)
+        .filter(|f| f.rule == "catch-unwind-under-panic-abort")
+        .map(|f| {
+            let rel = f.path.strip_prefix(&dir).expect("under dir");
+            (rel.to_string_lossy().replace('\\', "/"), f.message.clone())
+        })
+        .collect();
+    found.sort();
+    let paths: Vec<&str> = found.iter().map(|(p, _)| p.as_str()).collect();
+    assert_eq!(
+        paths,
+        ["ws/app/src/lib.rs", "ws/app/src/main.rs"],
+        "{found:#?}"
+    );
+    assert!(found[0].1.contains("`[profile.release]`"), "{}", found[0].1);
+    let _ = fs::remove_dir_all(&dir);
+}

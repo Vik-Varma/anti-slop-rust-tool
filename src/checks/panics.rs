@@ -108,6 +108,10 @@ pub fn method_call(a: &mut Analyzer, node: &syn::ExprMethodCall) {
     let scope = a.scope();
     let (test, in_drop, in_const) = (scope.test, scope.in_drop, scope.in_const);
     let method = node.method.to_string();
+    if method == "catch_unwind" && node.args.is_empty() {
+        catch_unwind(a, node.method.span()); // futures' `FutureExt::catch_unwind`
+        return;
+    }
     if test || in_const || !(method == "unwrap" && node.args.is_empty() || method == "expect") {
         return;
     }
@@ -184,4 +188,38 @@ pub fn macro_call(a: &mut Analyzer, mac: &syn::Macro) {
         ),
         _ => {}
     }
+}
+
+/// `catch_unwind` where the build profile makes panics abort: the process ends at the panic and
+/// the `Err` arm never runs. Tests are exempt because Cargo builds them with unwinding whatever
+/// the profile says, which is also why a test suite doesn't show the problem.
+pub fn call(a: &mut Analyzer, node: &syn::ExprCall) {
+    let Some(path) = call_path(node).filter(|p| path_ends_with(p, &["catch_unwind"])) else {
+        return;
+    };
+    let span = path
+        .segments
+        .last()
+        .map(|s| s.ident.span())
+        .unwrap_or_else(proc_macro2::Span::call_site);
+    catch_unwind(a, span);
+}
+
+fn catch_unwind(a: &mut Analyzer, span: proc_macro2::Span) {
+    if a.scope().test || a.abort_profiles.is_empty() {
+        return;
+    }
+    let profiles: Vec<String> = a
+        .abort_profiles
+        .iter()
+        .map(|p| format!("`[profile.{p}]`"))
+        .collect();
+    a.emit(
+        "catch-unwind-under-panic-abort",
+        span,
+        format!(
+            "`catch_unwind` can't catch here: {} sets `panic = \"abort\"`, so the panic ends the process and the `Err` arm never runs (tests still unwind, so they don't show it)",
+            profiles.join(" and ")
+        ),
+    );
 }

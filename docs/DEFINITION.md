@@ -33,10 +33,11 @@ hypotheses written down before the confirming data was collected ([EVIDENCE.md](
 The 50% bar is a floor, not a target. Google's Tricorder (Sadowski et al., ICSE 2015,
 <https://research.google/pubs/pub43322/>) enforces "a very low effective false positive rate
 (< 10%)", puts an analysis whose not-useful rate reaches 10% on probation, and may disable it
-above 25%. The four default rules are exact by construction: each flags only the precise
+above 25%. The five default rules are exact by construction: each flags only the precise
 construct its experiment shows failing (`uninit-memory`, `float-eq-inexact`, `deny-warnings`,
-`blocking-sleep-in-async`). They also had no instances in shipping code to audit, since mature
-projects don't contain them. Every rule with audit data fell short of the 50% bar once a second,
+`blocking-sleep-in-async`, `catch-unwind-under-panic-abort`). Four had no instances in shipping
+code to audit, since mature projects don't contain them; the fifth had one, judged real. Every
+rule with audit data fell short of the 50% bar once a second,
 independent rater traced the code: `todo` (6/15 reachable, census) and `lock-held-across-await` (7/7 real
 patterns, 0/7 able to deadlock as written) included. So all of them are notes.
 

@@ -12,13 +12,14 @@ mod context;
 mod features;
 mod finding;
 mod layout;
+mod manifest;
 pub mod metrics;
 pub mod rules;
 mod suppress;
 mod walk;
 
-pub use analyzer::{FileReport, analyze_source, analyze_source_as};
+pub use analyzer::{FileReport, Options, analyze_source, analyze_source_as, analyze_source_in};
 pub use context::FileKind;
 pub use features::Features;
 pub use finding::{Finding, Severity};
-pub use walk::{AnalyzeError, analyze_paths, rust_files};
+pub use walk::{AnalyzeError, analyze_paths, analyze_paths_with, rust_files};

@@ -32,6 +32,26 @@ pub fn analyze_source_as(
     source: &str,
     kind: FileKind,
 ) -> Result<FileReport, syn::Error> {
+    analyze_source_in(path, source, kind, Options::default())
+}
+
+/// What the caller knows about a file beyond its text and kind.
+#[derive(Clone, Debug, Default)]
+pub struct Options {
+    /// Build profiles that set `panic = "abort"` for the file (`crate::manifest`), by name.
+    /// `analyze_source` doesn't look them up, since its path needn't exist.
+    pub abort_profiles: Vec<String>,
+    /// Also run the style rules (a published guide's preferences, `Severity::Style`).
+    pub style: bool,
+}
+
+/// As [`analyze_source_as`], with [`Options`].
+pub fn analyze_source_in(
+    path: &Path,
+    source: &str,
+    kind: FileKind,
+    options: Options,
+) -> Result<FileReport, syn::Error> {
     let source = &blank_frontmatter(source);
     let file = syn::parse_file(source)?;
     let lines: Vec<&str> = source.lines().collect();
@@ -39,6 +59,8 @@ pub fn analyze_source_as(
     let mut analyzer = Analyzer {
         path: path.to_path_buf(),
         kind,
+        abort_profiles: options.abort_profiles,
+        style: options.style,
         lines: &lines,
         suppressions: Suppressions::parse(&comments),
         comments: &comments,
@@ -104,6 +126,10 @@ pub(crate) fn blank_frontmatter(source: &str) -> std::borrow::Cow<'_, str> {
 pub struct Analyzer<'a> {
     pub path: PathBuf,
     pub kind: FileKind,
+    /// Build profiles that set `panic = "abort"` for this file, by name (`release`).
+    pub abort_profiles: Vec<String>,
+    /// Whether the style rules run (`Options::style`).
+    pub style: bool,
     pub lines: &'a [&'a str],
     /// The comments on each line, from `crate::comments`.
     pub comments: &'a [crate::comments::Line],

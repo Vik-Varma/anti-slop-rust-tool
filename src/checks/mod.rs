@@ -43,6 +43,7 @@ pub fn method_call(a: &mut Analyzer, node: &syn::ExprMethodCall) {
 }
 
 pub fn call(a: &mut Analyzer, node: &syn::ExprCall) {
+    panics::call(a, node);
     unsafety::call(a, node);
     concurrency::call(a, node);
     errors::call(a, node);

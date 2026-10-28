@@ -11,6 +11,7 @@ mod comments;
 mod context;
 mod features;
 mod finding;
+pub mod harness;
 mod layout;
 mod manifest;
 pub mod metrics;

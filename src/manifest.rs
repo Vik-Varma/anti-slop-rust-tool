@@ -96,7 +96,7 @@ fn table_header(raw: &str) -> Option<String> {
 }
 
 /// Every `key = value` pair as (`table.key`, value), with string quotes removed from the value.
-fn entries(toml: &str) -> Vec<(String, String)> {
+pub(crate) fn entries(toml: &str) -> Vec<(String, String)> {
     let mut table = String::new();
     let mut out = Vec::new();
     for raw in toml.lines() {

@@ -90,6 +90,21 @@ verdicts:
 Tests, examples, benches, build scripts, `#[cfg(test)]` modules (including those in their own
 files), test-support crates and `xtask` crates aren't judged as shipping code.
 
+### The harness: judging a change, not a tree
+
+```sh
+anti-slop guard --since main --format agent   # findings on changed lines, plus what the change
+                                              # did to tests, benchmarks, profiles, suppressions
+anti-slop hook stop                           # Claude Code / Symposium hook protocol on stdin
+```
+
+For AI coding agents, and for CI. `guard` runs the rules on the lines a change touched (where
+findings are worth most: fresh code, not reviewed code), then reads the diff for the things an
+agent reaches for when a check is in its way: tests removed or ignored, benchmarks and profiles
+edited, `target-cpu=native`, suppressions without a reason, `todo!()` left behind. A policy file
+says what blocks. It ships as a Symposium plugin, a GitHub Action and a Claude Code hook; see
+[docs/HARNESS.md](docs/HARNESS.md).
+
 ### Style rules (opt in)
 
 ```sh

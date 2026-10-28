@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use anti_slop::{Finding, Severity, analyze_paths_with, rules};
@@ -10,13 +10,26 @@ anti-slop: find Rust code that is bad by an evidence-backed definition
 
 USAGE:
     anti-slop [check] [OPTIONS] <PATH>...   report findings (exit 1 if any)
+    anti-slop check --since REV|--staged [PATH]
+                                            only findings on lines changed since REV (or staged)
+    anti-slop guard --since REV|--staged [PATH]
+                                            the harness: findings on changed lines plus what the
+                                            change did to tests, benchmarks, profiles and
+                                            suppressions, judged by anti-slop.toml (exit 1 if
+                                            anything blocks)
+    anti-slop hook pre-tool-use|post-tool-use|stop
+                                            Claude Code hook protocol on stdin/stdout
     anti-slop metrics [--format csv|json] <PATH>...
                                             per-function size, complexity and finding counts
     anti-slop rules                         list the rules
     anti-slop explain <RULE>                why a rule exists, and its evidence
 
 OPTIONS:
-    --format text|json        output format (default text)
+    --format text|json|agent  output format (default text; `agent` is the summary-first
+                              report for a coding agent)
+    --since REV               judge only lines changed since REV (needs git)
+    --staged                  judge only lines staged for commit
+    --log FILE                append one JSON line per run (counts only) to FILE
     --min-severity LEVEL      style, note, warning or error (default warning; notes
                               are real but usually deliberate; style rules are Google's
                               Rust style guide, see `anti-slop rules`)
@@ -52,28 +65,38 @@ impl From<&str> for Error {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Command {
     Check,
+    Guard,
     Metrics,
 }
 
 struct Options {
     format: String,
     min_severity: Severity,
+    /// Set explicitly, so the harness knows whether to defer to the policy.
+    severity_given: bool,
     only: Vec<String>,
     skip: Vec<String>,
+    since: Option<String>,
+    staged: bool,
+    log: Option<PathBuf>,
     paths: Vec<PathBuf>,
 }
 
 fn parse_options(command: Command, args: &[String]) -> Result<Options, Error> {
     let mut o = Options {
-        format: if command == Command::Check {
-            "text"
-        } else {
+        format: if command == Command::Metrics {
             "csv"
+        } else {
+            "text"
         }
         .into(),
         min_severity: Severity::Warning,
+        severity_given: false,
         only: vec![],
         skip: vec![],
+        since: None,
+        staged: false,
+        log: None,
         paths: vec![],
     };
     let mut it = args.iter();
@@ -84,7 +107,11 @@ fn parse_options(command: Command, args: &[String]) -> Result<Options, Error> {
             "--min-severity" => {
                 let v = value("--min-severity")?;
                 o.min_severity = Severity::parse(&v).ok_or(format!("unknown severity `{v}`"))?;
+                o.severity_given = true;
             }
+            "--since" => o.since = Some(value("--since")?),
+            "--staged" => o.staged = true,
+            "--log" => o.log = Some(PathBuf::from(value("--log")?)),
             "--only" => o.only.extend(value("--only")?.split(',').map(String::from)),
             "--skip" => o.skip.extend(value("--skip")?.split(',').map(String::from)),
             flag if flag.starts_with("--") => return Err(format!("unknown option `{flag}`").into()),
@@ -96,10 +123,9 @@ fn parse_options(command: Command, args: &[String]) -> Result<Options, Error> {
             return Err(format!("unknown rule `{id}`; `anti-slop rules` lists them").into());
         }
     }
-    let formats: &[&str] = if command == Command::Check {
-        &["text", "json"]
-    } else {
-        &["csv", "json"]
+    let formats: &[&str] = match command {
+        Command::Check | Command::Guard => &["text", "json", "agent"],
+        Command::Metrics => &["csv", "json"],
     };
     if !formats.contains(&o.format.as_str()) {
         return Err(format!(
@@ -116,8 +142,21 @@ fn parse_options(command: Command, args: &[String]) -> Result<Options, Error> {
             "`metrics` reports every rule; --only, --skip and --min-severity don't apply".into(),
         );
     }
+    if o.since.is_some() && o.staged {
+        return Err("give --since or --staged, not both".into());
+    }
+    if command == Command::Guard && o.since.is_none() && !o.staged {
+        return Err("guard needs --since REV or --staged".into());
+    }
+    if o.format == "agent" && o.since.is_none() && !o.staged && command == Command::Check {
+        return Err("--format agent goes with --since or --staged".into());
+    }
     if o.paths.is_empty() {
-        return Err("give at least one file or directory".into());
+        if o.since.is_some() || o.staged {
+            o.paths.push(PathBuf::from("."));
+        } else {
+            return Err("give at least one file or directory".into());
+        }
     }
     Ok(o)
 }
@@ -132,6 +171,8 @@ fn main() -> ExitCode {
         Some("rules") => list_rules(),
         Some("explain") => explain(args.get(1)),
         Some("metrics") => parse_options(Command::Metrics, &args[1..]).and_then(|o| metrics(&o)),
+        Some("guard") => parse_options(Command::Guard, &args[1..]).and_then(|o| harness(&o, true)),
+        Some("hook") => hook(args.get(1)),
         Some("check") => parse_options(Command::Check, &args[1..]).and_then(|o| check(&o)),
         Some(_) => parse_options(Command::Check, &args).and_then(|o| check(&o)),
         None => Err(Error::Usage(String::new())),
@@ -219,7 +260,123 @@ fn wants_style(o: &Options) -> bool {
             .any(|id| rules::get(id).is_some_and(|r| r.severity == Severity::Style))
 }
 
+/// `check --since`/`--staged` and `guard`: the harness over a change. `check` shows only the
+/// findings; `guard` also judges the change and exits 1 when the policy says something blocks.
+fn harness(o: &Options, guard: bool) -> Result<ExitCode, Error> {
+    use anti_slop::harness::{self, Selection, agent, diff::Base, policy::Policy};
+    let start = o
+        .paths
+        .first()
+        .cloned()
+        .unwrap_or_else(|| PathBuf::from("."));
+    let dir = if start.is_dir() {
+        start.clone()
+    } else {
+        start.parent().map(Path::to_path_buf).unwrap_or_default()
+    };
+    let root = harness::diff::repo_root(&dir)?;
+    let policy = Policy::load(&root)?;
+    let base = if o.staged {
+        Base::Staged
+    } else {
+        Base::Rev(o.since.clone().unwrap_or_else(|| policy.base.clone()))
+    };
+    let sel = Selection {
+        min_severity: o.severity_given.then_some(o.min_severity),
+        only: o.only.clone(),
+        skip: o.skip.clone(),
+        style: wants_style(o).then_some(true),
+    };
+    let run = harness::run(&root, &base, &policy, &sel)?;
+    let mut out = io::stdout().lock();
+    let text = match o.format.as_str() {
+        "agent" => agent::render(&run),
+        "json" => {
+            let findings: Vec<&Finding> = run.findings.iter().collect();
+            let mut buf = Vec::new();
+            write_json(&mut buf, &findings)?;
+            let mut s = String::from_utf8_lossy(&buf).into_owned();
+            if guard {
+                let items: Vec<String> = run.guard.items.iter().map(|i| format!(
+                    "  {{\"kind\": {}, \"blocking\": {}, \"path\": {}, \"line\": {}, \"detail\": {}}}",
+                    json_str(i.kind), i.blocking, json_str(&i.path.to_string_lossy()),
+                    i.line.map(|l| l.to_string()).unwrap_or_else(|| "null".into()), json_str(&i.detail)
+                )).collect();
+                s = format!(
+                    "{{\"findings\": {}, \"guard\": [\n{}\n], \"blocking\": {}, \"lines_added\": {}, \"lines_removed\": {}}}\n",
+                    s.trim_end(),
+                    items.join(",\n"),
+                    run.blocking(),
+                    run.guard.lines_added,
+                    run.guard.lines_removed
+                );
+            }
+            s
+        }
+        _ => {
+            let mut buf = Vec::new();
+            let findings: Vec<&Finding> = run.findings.iter().collect();
+            write_text(&mut buf, &findings, run.changes.len())?;
+            let mut s = String::from_utf8_lossy(&buf).into_owned();
+            if guard {
+                s.push_str(
+                    &agent::render(&run)
+                        .lines()
+                        .skip_while(|l| !l.starts_with("guard:"))
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                );
+                s.push('\n');
+            }
+            s
+        }
+    };
+    out.write_all(text.as_bytes())?;
+    for e in &run.errors {
+        eprintln!("anti-slop: {e}");
+    }
+    if let Some(log) = &o.log {
+        harness::log(log, &run, if guard { "guard" } else { "check" }, text.len())?;
+    }
+    let failed = if guard {
+        run.blocking() > 0
+    } else {
+        !run.findings.is_empty()
+    };
+    Ok(if !run.errors.is_empty() {
+        ExitCode::from(2)
+    } else if failed {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
+    })
+}
+
+/// `hook EVENT`: Claude Code's protocol. Always exits 0; the JSON on stdout carries the decision.
+fn hook(event: Option<&String>) -> Result<ExitCode, Error> {
+    use anti_slop::harness::hook::{Event, run};
+    let name = event.ok_or("hook needs an event: pre-tool-use, post-tool-use or stop")?;
+    let event = Event::parse(name).ok_or(format!("unknown hook event `{name}`"))?;
+    let mut input = String::new();
+    io::Read::read_to_string(&mut io::stdin().lock(), &mut input)?;
+    let cwd = std::env::current_dir()?;
+    let outcome = run(event, &input, &cwd);
+    if !outcome.stdout.is_empty() {
+        io::stdout().lock().write_all(outcome.stdout.as_bytes())?;
+    }
+    if !outcome.stderr.is_empty() {
+        eprintln!("{}", outcome.stderr);
+    }
+    if let (Some(run), Ok(log)) = (&outcome.run, std::env::var("ANTI_SLOP_LOG")) {
+        let _ = anti_slop::harness::log(Path::new(&log), run, "hook", outcome.stdout.len());
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
 fn check(o: &Options) -> Result<ExitCode, Error> {
+    if o.since.is_some() || o.staged {
+        return harness(o, false);
+    }
     let (reports, errors) = analyze_paths_with(&o.paths, wants_style(o));
     let findings: Vec<&Finding> = reports
         .iter()

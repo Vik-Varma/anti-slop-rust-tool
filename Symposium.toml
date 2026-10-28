@@ -1,0 +1,48 @@
+# anti-slop as a Symposium plugin (https://symposium.dev): installed into every agent
+# `cargo agents` manages, for every Rust workspace. In a custom plugin source this file is the
+# plugin; `cargo agents use anti-slop` enables it. docs/HARNESS.md explains each part.
+name = "anti-slop"
+depends-on = ["*"]
+
+[[installations]]
+name = "anti-slop"
+source = "cargo"
+crate = "anti-slop"
+git = "https://github.com/Vik-Varma/anti-slop-rust-tool"
+executable = "anti-slop"
+
+# A short skill: when to run the harness and how to read its verdict.
+[[skills]]
+source.path = "skills"
+
+# `cargo agents anti-slop guard --since main`
+[subcommand.anti-slop]
+description = "Check Rust changes for demonstrably bad code and for edits to the tests, benchmarks and profiles that judge them"
+audience = "agents"
+command = "anti-slop"
+
+# Before a commit or push: deny it while the policy says something blocks. Canonical format, so
+# it runs on every agent Symposium delivers shell events for.
+[[hooks]]
+name = "anti-slop-before-commit"
+event = "PreToolUse"
+matcher = "^(Bash|bash|run_command|execute_bash)$"
+command = "anti-slop"
+args = ["hook", "pre-tool-use"]
+
+# After an edit to a Rust file: that file's findings, as added context.
+[[hooks]]
+name = "anti-slop-after-edit"
+event = "PostToolUse"
+matcher = "^(Edit|Write|MultiEdit|edit|write|edit_file|write_file|create_file|apply_patch|replace_file_content|write_to_file)$"
+command = "anti-slop"
+args = ["hook", "post-tool-use"]
+
+# When the agent wants to stop: send it back while something blocks, three times at most. Only
+# Claude Code's native hook can refuse a stop, so this one is Claude-only.
+[[hooks]]
+name = "anti-slop-before-stop"
+event = "Stop"
+format = "claude"
+command = "anti-slop"
+args = ["hook", "stop"]

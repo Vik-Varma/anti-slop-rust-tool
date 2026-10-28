@@ -1,0 +1,50 @@
+# anti-slop as a GitHub Action: the harness over a pull request's diff.
+#
+#   - uses: actions/checkout@v5
+#     with: { fetch-depth: 0 }          # the base commit must be present
+#   - uses: Vik-Varma/anti-slop-rust-tool@main
+#     with:
+#       base: ${{ github.event.pull_request.base.sha }}
+#
+# Exit 1 when the policy (anti-slop.toml at the repository root, or the default) says something
+# blocks. The report is written to the job summary and the step log.
+name: anti-slop
+description: Check a Rust change for demonstrably bad code and for edits to what judges it
+inputs:
+  base:
+    description: The commit or branch to diff against
+    required: false
+    default: ${{ github.event.pull_request.base.sha || 'HEAD~1' }}
+  path:
+    description: The directory to check (inside the repository)
+    required: false
+    default: .
+  style:
+    description: Also run the style rules (Google's Rust style guide) at style severity
+    required: false
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - name: Install anti-slop
+      shell: bash
+      run: |
+        if ! command -v anti-slop >/dev/null 2>&1; then
+          cargo install --quiet --git https://github.com/Vik-Varma/anti-slop-rust-tool --locked anti-slop
+        fi
+    - name: Run the harness on the change
+      shell: bash
+      run: |
+        set +e
+        extra=""
+        if [ "${{ inputs.style }}" = "true" ]; then extra="--min-severity style"; fi
+        anti-slop guard --since "${{ inputs.base }}" --format agent $extra "${{ inputs.path }}" | tee anti-slop-report.txt
+        code=${PIPESTATUS[0]}
+        {
+          echo '## anti-slop'
+          echo
+          echo '```'
+          cat anti-slop-report.txt
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"
+        exit $code

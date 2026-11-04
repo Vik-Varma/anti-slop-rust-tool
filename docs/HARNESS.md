@@ -37,22 +37,26 @@ a linter run on the result. All of them are visible in the diff.
 
 ## `guard`: the measuring stick and the handoff
 
-`guard` runs `check --since` and then reads the diff itself, every file, not only Rust. Each item
+`guard` runs `check --since` and then reads the diff itself, every file, not only Rust. Files git
+doesn't track yet count as wholly added against a revision (a new file is what an agent leaves
+before it stages anything); `--staged` sees only what is staged. Each item
 has a kind; the policy says which kinds block and which are only reported.
 
 | Kind | What it catches | Default |
 |---|---|---|
 | `findings` | warnings and errors (or the configured severity) on changed lines | block |
 | `suppression-without-reason` | `// anti-slop: allow(rule)` added with no reason, or one under 12 characters | block |
-| `tests-removed` | more `#[test]` functions removed than added in a file | block |
-| `tests-ignored` | `#[ignore]` added | block |
+| `tests-removed` | a test gone from the change, matched by name across all files, with no new test taking its place; or a `#[test]` attribute removed so the function stays but no longer runs | block |
+| `tests-ignored` | `#[ignore]` added to a test that already existed | block |
 | `flags` | `target-cpu=native`, `RUSTFLAGS` or `rustflags` added anywhere | block |
 | `suppressions` | any `anti-slop: allow(..)` added, with its reason | report |
 | `allow-attributes` | `#[allow(..)]` or `#[expect(..)]` added | report |
-| `assertions-removed` | more assertions removed than added in a test file | report |
+| `tests-renamed` | a test gone and a different one added in its place: a replacement or a rename, a person decides which | report |
+| `new-test-ignored` | a new test added already `#[ignore]`d, which `cargo test` will not run; check that CI runs ignored tests | report |
+| `assertions-removed` | more assertions removed from test files than added anywhere in the change | report |
 | `deferrals` | `todo!()`, `unimplemented!()`, or a TODO/FIXME/HACK comment added | report |
 | `measuring-stick` | a benchmark, test, `[profile]`, `[lints]`, `.cargo/config`, toolchain, lint-config or CI file changed | report |
-| `size` | a changed file over 1,000 code lines | report |
+| `size` | a file over 1,000 code lines that the change made longer | report |
 
 Two details come straight from the record. Sizes are code lines, not raw lines, because an agent
 told to shrink a file will delete the comments; and a `Cargo.toml` edit is a measuring-stick change
@@ -198,6 +202,9 @@ harness is being gamed, and the log will show it.
   staged file is judged as it is on disk.
 - A local function named `catch_unwind`, or a `use` of a module whose last segment looks like a
   function, is taken at face value, as the rules' own entries say.
+- Tests are matched by name inside the diff. A renamed test whose `#[test]` line is untouched shows
+  no change at all, which is fine because it still runs; a test moved to another file with the
+  same name is not a removal.
 - It can't see a redundant write that a later call overwrites; rustc and Clippy can't either, and
   `cargo mutants` doesn't delete assignments. [research/redundant-code.md](research/redundant-code.md)
   sets out what could.

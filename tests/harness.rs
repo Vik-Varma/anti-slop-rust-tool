@@ -340,3 +340,190 @@ fn agent_format_preserves_locations() {
 fn json_escape(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
+
+/// A repository whose base commit holds exactly `files`.
+fn repo_with(name: &str, files: &[(&str, &str)]) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("anti-slop-harness-{name}-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).expect("dir");
+    git(&dir, &["init", "-q", "-b", "main"]);
+    write(
+        &dir,
+        "Cargo.toml",
+        "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    );
+    for (path, body) in files {
+        write(&dir, path, body);
+    }
+    git(&dir, &["add", "."]);
+    git(&dir, &["commit", "-q", "-m", "base"]);
+    dir
+}
+
+fn guard_text(dir: &Path) -> (Option<i32>, String) {
+    let o = bin()
+        .args(["guard", "--since", "HEAD", "--format", "agent"])
+        .arg(dir)
+        .output()
+        .expect("runs");
+    (o.status.code(), out_text(&o))
+}
+
+const GATE: &str = "#[test]\nfn overlapping_windows_cannot_be_reserved_together() { assert!(true); }\n\n\
+                    #[test]\nfn non_overlapping_windows_can_be_reserved_together() { assert!(true); }\n\n\
+                    #[test]\nfn dropping_reservation_releases_window() { assert!(true); }\n";
+
+/// Reported against `guard` by the SteelMC #775 review: three tests moved to a new file with the
+/// same names and assertions, plus two new ones, is not a removal. The new file is untracked,
+/// which `git diff` alone doesn't show.
+#[test]
+fn moved_tests_are_not_removed_tests() {
+    let dir = repo_with(
+        "moved",
+        &[
+            ("tests/work_gate.rs", GATE),
+            ("src/lib.rs", "pub fn f() {}\n"),
+        ],
+    );
+    fs::remove_file(dir.join("tests/work_gate.rs")).expect("remove");
+    let more = format!(
+        "{GATE}\n#[test]\nfn extra_one() {{ assert!(true); }}\n\n#[test]\nfn extra_two() {{ assert!(true); }}\n"
+    );
+    write(&dir, "tests/window_gate.rs", &more);
+    let (code, text) = guard_text(&dir);
+    assert!(!text.contains("tests-removed"), "{text}");
+    assert!(!text.contains("assertions-removed"), "{text}");
+    assert_eq!(code, Some(0), "{text}");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+const SLOW_BASE: &str = "pub fn f() -> u8 { 1 }\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn old_fast() { assert_eq!(super::f(), 1); }\n}\n";
+
+#[test]
+fn a_new_test_added_ignored_is_not_a_disabled_test() {
+    let dir = repo_with("newignored", &[("src/lib.rs", SLOW_BASE)]);
+    write(
+        &dir,
+        "src/lib.rs",
+        &SLOW_BASE.replace(
+            "}\n}\n",
+            "}\n\n    #[test]\n    #[ignore = \"slow; run with --release\"]\n    fn new_slow() { assert_eq!(super::f(), 1); }\n}\n",
+        ),
+    );
+    let (code, text) = guard_text(&dir);
+    assert_eq!(code, Some(0), "{text}");
+    assert!(
+        text.contains("new-test-ignored") && text.contains("new_slow"),
+        "{text}"
+    );
+    assert!(!text.contains("block  tests-ignored"), "{text}");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn ignoring_an_existing_test_still_blocks() {
+    let dir = repo_with("oldignored", &[("src/lib.rs", SLOW_BASE)]);
+    write(
+        &dir,
+        "src/lib.rs",
+        &SLOW_BASE.replace("    #[test]\n", "    #[test]\n    #[ignore]\n"),
+    );
+    let (code, text) = guard_text(&dir);
+    assert_eq!(code, Some(1), "{text}");
+    assert!(text.contains("block  tests-ignored"), "{text}");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn removed_renamed_and_disabled_tests() {
+    // Deleted outright: blocks.
+    let dir = repo_with("deleted", &[("src/lib.rs", SLOW_BASE)]);
+    write(&dir, "src/lib.rs", "pub fn f() -> u8 { 1 }\n");
+    let (code, text) = guard_text(&dir);
+    assert_eq!(code, Some(1), "{text}");
+    assert!(
+        text.contains("block  tests-removed") && text.contains("old_fast"),
+        "{text}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+    // Only the function's name changed: the test still runs, so there is nothing to report.
+    let dir = repo_with("renamed", &[("src/lib.rs", SLOW_BASE)]);
+    write(
+        &dir,
+        "src/lib.rs",
+        &SLOW_BASE.replace("old_fast", "old_quick"),
+    );
+    let (code, text) = guard_text(&dir);
+    assert_eq!(code, Some(0), "{text}");
+    assert!(!text.contains("tests-removed"), "{text}");
+    let _ = fs::remove_dir_all(&dir);
+    // One test removed and a different one added elsewhere: reported, not blocked, because the
+    // count of tests is the same and a person can see which it was.
+    let base = "pub fn f() -> u8 { 1 }\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn old_fast() { assert_eq!(super::f(), 1); }\n\n    fn helper() {}\n}\n";
+    let dir = repo_with("replaced", &[("src/lib.rs", base)]);
+    write(
+        &dir,
+        "src/lib.rs",
+        "pub fn f() -> u8 { 1 }\n\n#[cfg(test)]\nmod tests {\n    fn helper() {}\n\n    #[test]\n    fn replacement() { assert_eq!(super::f(), 1); }\n}\n",
+    );
+    let (code, text) = guard_text(&dir);
+    assert_eq!(code, Some(0), "{text}");
+    assert!(
+        text.contains("tests-renamed") && text.contains("old_fast") && text.contains("replacement"),
+        "{text}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+    // The attribute removed, the function left behind: the test no longer runs.
+    let dir = repo_with("disabled", &[("src/lib.rs", SLOW_BASE)]);
+    write(&dir, "src/lib.rs", &SLOW_BASE.replace("    #[test]\n", ""));
+    let (code, text) = guard_text(&dir);
+    assert_eq!(code, Some(1), "{text}");
+    assert!(text.contains("block  tests-removed"), "{text}");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_file_over_the_limit_is_reported_only_when_the_change_grows_it() {
+    let base = "pub fn a() -> u8 { 1 }\npub fn b() -> u8 { 2 }\npub fn c() -> u8 { 3 }\npub fn d() -> u8 { 4 }\n";
+    let dir = repo_with(
+        "size",
+        &[
+            ("src/lib.rs", base),
+            ("anti-slop.toml", "max_file_lines = 3\n"),
+        ],
+    );
+    write(&dir, "src/lib.rs", &base.replace("{ 4 }", "{ 5 }"));
+    let (_, text) = guard_text(&dir);
+    assert!(
+        !text.contains("code lines, over the"),
+        "unchanged size: {text}"
+    );
+    write(
+        &dir,
+        "src/lib.rs",
+        &format!("{base}pub fn e() -> u8 {{ 6 }}\n"),
+    );
+    let (_, text) = guard_text(&dir);
+    assert!(
+        text.contains("code lines, over the 3-line limit"),
+        "grew: {text}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn untracked_files_are_part_of_the_change() {
+    let dir = repo_with("untracked", &[("src/lib.rs", "pub fn f() {}\n")]);
+    write(
+        &dir,
+        "src/new.rs",
+        "pub fn g(x: f64) -> bool { x == 0.1 }\n",
+    );
+    let (code, text) = guard_text(&dir);
+    assert_eq!(code, Some(1), "{text}");
+    assert!(
+        text.contains("src/new.rs:1") && text.contains("float-eq-inexact"),
+        "{text}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}

@@ -26,12 +26,23 @@ pub const KINDS: &[(&str, &str)] = &[
     ),
     (
         "tests-removed",
-        "more `#[test]` functions removed than added in a file",
+        "a `#[test]` function that is gone from the change (by name, across all files), with no new test to account for it, or whose attribute was removed",
     ),
-    ("tests-ignored", "`#[ignore]` added"),
+    (
+        "tests-renamed",
+        "a test that is gone and a new one added in its place: a rename or a replacement",
+    ),
+    (
+        "new-test-ignored",
+        "a new test added already `#[ignore]`d, which `cargo test` will not run",
+    ),
+    (
+        "tests-ignored",
+        "`#[ignore]` added to a test that already existed",
+    ),
     (
         "assertions-removed",
-        "more assertions removed than added in a test file",
+        "more assertions removed from test files than added anywhere in the change",
     ),
     (
         "deferrals",
@@ -45,7 +56,10 @@ pub const KINDS: &[(&str, &str)] = &[
         "measuring-stick",
         "a benchmark, test, profile, toolchain, lint-config or CI file changed",
     ),
-    ("size", "a changed file over the line limit"),
+    (
+        "size",
+        "a file over the line limit that the change made longer",
+    ),
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq)]

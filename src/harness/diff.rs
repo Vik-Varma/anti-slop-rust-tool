@@ -2,6 +2,7 @@
 //! the harness can judge only what an agent (or a person) touched. Needs `git` on the path; the
 //! analysis itself never does.
 
+use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -30,6 +31,10 @@ pub struct Changed {
     pub added: Vec<(usize, String)>,
     /// Removed lines (old-side text only).
     pub removed: Vec<String>,
+    /// Where each hunk's lines start in `added` and in `removed`, so a reader can tell lines that
+    /// were changed together from lines that merely follow one another.
+    pub added_starts: Vec<usize>,
+    pub removed_starts: Vec<usize>,
 }
 
 impl Changed {
@@ -72,7 +77,54 @@ pub fn changes(root: &Path, base: &Base) -> io::Result<Vec<Changed>> {
         Base::Staged => args.push("--cached"),
     }
     args.push("--");
-    Ok(parse(&git(root, &args)?))
+    let mut out = parse(&git(root, &args)?);
+    // `git diff` doesn't show files git doesn't track yet, and a new file is exactly what an agent
+    // leaves behind before it stages anything. Against a revision they count as wholly added.
+    if matches!(base, Base::Rev(_)) {
+        for path in git(root, &["ls-files", "--others", "--exclude-standard"])
+            .unwrap_or_default()
+            .lines()
+        {
+            let path = PathBuf::from(path);
+            if out.iter().any(|c| c.path == path) {
+                continue;
+            }
+            if let Some(c) = untracked(root, path) {
+                out.push(c);
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// An untracked file as a change that adds all of its lines. Unreadable and non-UTF-8 files (and
+/// anything over 2 MB) count as binary: they are listed, not read.
+fn untracked(root: &Path, path: PathBuf) -> Option<Changed> {
+    let full = root.join(&path);
+    let meta = fs::metadata(&full).ok()?;
+    if !meta.is_file() {
+        return None;
+    }
+    let mut c = Changed {
+        path,
+        ..Changed::default()
+    };
+    match fs::read_to_string(&full) {
+        Ok(text) if meta.len() <= 2 * 1024 * 1024 => {
+            c.added = text
+                .lines()
+                .enumerate()
+                .map(|(i, l)| (i + 1, l.to_string()))
+                .collect();
+            if !c.added.is_empty() {
+                c.ranges.push((1, c.added.len()));
+            }
+            c.added_starts.push(0);
+            c.removed_starts.push(0);
+        }
+        _ => c.binary = true,
+    }
+    Some(c)
 }
 
 /// A file's content at `base` (before the change), if it existed there.
@@ -121,6 +173,8 @@ pub fn parse(text: &str) -> Vec<Changed> {
                 None => (plus.parse().unwrap_or(0), 1),
             };
             new_line = start;
+            cur.added_starts.push(cur.added.len());
+            cur.removed_starts.push(cur.removed.len());
             if count > 0 {
                 cur.ranges.push((start, start + count - 1));
             }

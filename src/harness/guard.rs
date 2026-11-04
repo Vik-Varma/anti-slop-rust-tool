@@ -78,15 +78,76 @@ fn measuring_stick(c: &Changed) -> Option<&'static str> {
     }
 }
 
-fn count(lines: impl Iterator<Item = impl AsRef<str>>, needle: &str) -> usize {
-    lines.filter(|l| l.as_ref().contains(needle)).count()
-}
-
 fn is_assertion(l: &str) -> bool {
     let t = l.trim_start();
     ["assert!", "assert_eq!", "assert_ne!", "debug_assert!"]
         .iter()
         .any(|a| t.starts_with(a))
+}
+
+/// One file's changed lines, split by hunk. A change built by hand, with no hunk offsets, is one
+/// hunk.
+fn hunks<'a, T>(items: &'a [T], starts: &[usize]) -> Vec<&'a [T]> {
+    if starts.is_empty() {
+        return if items.is_empty() {
+            Vec::new()
+        } else {
+            vec![items]
+        };
+    }
+    let mut out = Vec::new();
+    for (i, &s) in starts.iter().enumerate() {
+        let e = starts.get(i + 1).copied().unwrap_or(items.len());
+        if s < e {
+            out.push(&items[s..e]);
+        }
+    }
+    out
+}
+
+/// `#[test]`, `#[tokio::test]`, `#[tokio::test(flavor = "..")]` and the like.
+fn is_test_attr(line: &str) -> bool {
+    let t = line.trim();
+    t.starts_with("#[test]")
+        || (t.starts_with("#[") && (t.contains("::test]") || t.contains("::test(")))
+}
+
+/// The name in `pub async fn name(..)`, if the line declares a function.
+fn fn_name(line: &str) -> Option<String> {
+    let t = line.trim_start();
+    let i = t.find("fn ")?;
+    if i > 0 && !t[..i].ends_with(' ') {
+        return None;
+    }
+    let name: String = t[i + 3..]
+        .chars()
+        .take_while(|c| c.is_alphanumeric() || *c == '_')
+        .collect();
+    (!name.is_empty()).then_some(name)
+}
+
+/// The function that the attributes just above `lines` belong to: the first line that is neither
+/// an attribute, a comment nor blank.
+fn following_fn<'a>(lines: impl Iterator<Item = &'a str>) -> Option<String> {
+    for l in lines {
+        let t = l.trim();
+        if t.is_empty() || t.starts_with("#[") || t.starts_with("//") {
+            continue;
+        }
+        return fn_name(t);
+    }
+    None
+}
+
+/// The tests declared in one hunk: `Some(name)` for a test attribute with its function in the same
+/// hunk, `None` for an attribute whose function is not part of the hunk.
+fn hunk_tests(lines: &[&str]) -> Vec<Option<String>> {
+    lines
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| is_test_attr(l))
+        .map(|(i, _)| following_fn(lines[i + 1..].iter().copied()))
+        .collect()
 }
 
 fn code_lines(src: &str) -> usize {
@@ -158,6 +219,100 @@ pub fn run(root: &Path, base: &Base, policy: &Policy, changes: &[Changed]) -> Re
             detail,
         });
     };
+    // Tests are matched by name across the whole change, so a test moved to another file is not a
+    // removed test, and a test that only gained `#[ignore]` can be told from a new one.
+    let mut removed: Vec<(PathBuf, String)> = Vec::new();
+    let mut removed_unnamed: Vec<PathBuf> = Vec::new();
+    let mut added: Vec<String> = Vec::new();
+    let mut added_unnamed = 0usize;
+    for c in changes.iter().filter(|c| c.is_rust() && !c.binary) {
+        for h in hunks(&c.removed, &c.removed_starts) {
+            let lines: Vec<&str> = h.iter().map(String::as_str).collect();
+            for t in hunk_tests(&lines) {
+                match t {
+                    Some(n) => removed.push((c.path.clone(), n)),
+                    None => removed_unnamed.push(c.path.clone()),
+                }
+            }
+        }
+        for h in hunks(&c.added, &c.added_starts) {
+            let lines: Vec<&str> = h.iter().map(|(_, l)| l.as_str()).collect();
+            for t in hunk_tests(&lines) {
+                match t {
+                    Some(n) => added.push(n),
+                    None => added_unnamed += 1,
+                }
+            }
+        }
+    }
+    let removed_names: std::collections::HashSet<&str> =
+        removed.iter().map(|(_, n)| n.as_str()).collect();
+    let added_names: std::collections::HashSet<&str> = added.iter().map(String::as_str).collect();
+    let gone: Vec<&(PathBuf, String)> = removed
+        .iter()
+        .filter(|(_, n)| !added_names.contains(n.as_str()))
+        .collect();
+    let fresh: Vec<&String> = added
+        .iter()
+        .filter(|n| !removed_names.contains(n.as_str()))
+        .collect();
+    for (i, (path, name)) in gone.iter().enumerate() {
+        match fresh.get(i) {
+            Some(new) => push(
+                "tests-renamed",
+                path,
+                None,
+                format!(
+                    "`{name}` is gone and `{new}` was added; a rename or a replacement, check which"
+                ),
+            ),
+            None => push(
+                "tests-removed",
+                path,
+                None,
+                format!("test `{name}` is gone and no new test replaces it"),
+            ),
+        }
+    }
+    for path in removed_unnamed
+        .iter()
+        .take(removed_unnamed.len().saturating_sub(added_unnamed))
+    {
+        push(
+            "tests-removed",
+            path,
+            None,
+            "a test attribute was removed, so the function it was on no longer runs as a test"
+                .into(),
+        );
+    }
+    let asserts_removed = changes
+        .iter()
+        .filter(|c| c.is_rust() && measuring_stick(c) == Some("test file"))
+        .flat_map(|c| {
+            c.removed
+                .iter()
+                .filter(|l| is_assertion(l))
+                .map(move |_| &c.path)
+        })
+        .collect::<Vec<_>>();
+    let asserts_added: usize = changes
+        .iter()
+        .filter(|c| c.is_rust())
+        .map(|c| c.added.iter().filter(|(_, l)| is_assertion(l)).count())
+        .sum();
+    if asserts_removed.len() > asserts_added {
+        push(
+            "assertions-removed",
+            asserts_removed[0],
+            None,
+            format!(
+                "{} assertions removed from test files, {} added anywhere in the change",
+                asserts_removed.len(),
+                asserts_added
+            ),
+        );
+    }
     for c in changes {
         if c.binary {
             continue;
@@ -229,14 +384,6 @@ pub fn run(root: &Path, base: &Base, policy: &Policy, changes: &[Changed]) -> Re
             {
                 push("allow-attributes", &c.path, Some(*n), format!("`{t}`"));
             }
-            if code.starts_with("#[ignore") {
-                push(
-                    "tests-ignored",
-                    &c.path,
-                    Some(*n),
-                    "`#[ignore]` added".into(),
-                );
-            }
             if test_file {
                 continue;
             }
@@ -258,26 +405,29 @@ pub fn run(root: &Path, base: &Base, policy: &Policy, changes: &[Changed]) -> Re
                 );
             }
         }
-        let tests_removed = count(c.removed.iter(), "#[test]");
-        let tests_added = count(c.added.iter().map(|(_, l)| l), "#[test]");
-        if tests_removed > tests_added {
-            push(
-                "tests-removed",
-                &c.path,
-                None,
-                format!("{} `#[test]` removed, {} added", tests_removed, tests_added),
-            );
-        }
-        if measuring_stick(c) == Some("test file") {
-            let removed = c.removed.iter().filter(|l| is_assertion(l)).count();
-            let added = c.added.iter().filter(|(_, l)| is_assertion(l)).count();
-            if removed > added {
-                push(
-                    "assertions-removed",
-                    &c.path,
-                    None,
-                    format!("{removed} assertions removed, {added} added"),
-                );
+        // `#[ignore]` on a test the change adds is a new test that `cargo test` won't run, which
+        // is worth a note; on a test that already existed it is a test switched off.
+        for h in hunks(&c.added, &c.added_starts) {
+            for (k, (n, l)) in h.iter().enumerate() {
+                if !split_line(l.trim()).0.starts_with("#[ignore") {
+                    continue;
+                }
+                match following_fn(h[k + 1..].iter().map(|(_, l)| l.as_str())) {
+                    Some(name) if !removed_names.contains(name.as_str()) => push(
+                        "new-test-ignored",
+                        &c.path,
+                        Some(*n),
+                        format!(
+                            "new test `{name}` is `#[ignore]`d, so `cargo test` will not run it; check that CI runs ignored tests"
+                        ),
+                    ),
+                    _ => push(
+                        "tests-ignored",
+                        &c.path,
+                        Some(*n),
+                        "`#[ignore]` added to a test that already existed".into(),
+                    ),
+                }
             }
         }
         // Code lines, not raw lines, so deleting comments doesn't count as shrinking.
@@ -297,7 +447,7 @@ pub fn run(root: &Path, base: &Base, policy: &Policy, changes: &[Changed]) -> Re
         };
         r.lines_added += new.saturating_sub(old);
         r.lines_removed += old.saturating_sub(new);
-        if new > policy.max_file_lines {
+        if new > policy.max_file_lines && new > old {
             push(
                 "size",
                 &c.path,
@@ -366,6 +516,8 @@ mod tests {
         assert_eq!(
             kinds,
             vec![
+                ("tests-removed", true),
+                ("assertions-removed", false),
                 ("measuring-stick", false),
                 ("measuring-stick", false),
                 ("flags", true),
@@ -374,10 +526,8 @@ mod tests {
                 ("allow-attributes", false),
                 ("deferrals", false),
                 ("deferrals", false),
-                ("tests-removed", true),
                 ("measuring-stick", false),
                 ("tests-ignored", true),
-                ("assertions-removed", false),
             ],
             "{:#?}",
             r.items

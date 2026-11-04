@@ -477,6 +477,7 @@ impl<'ast> Visit<'ast> for Analyzer<'_> {
     }
 
     fn visit_block(&mut self, node: &'ast syn::Block) {
+        checks::block(self, node);
         if !self.scope().in_drop {
             return visit::visit_block(self, node);
         }

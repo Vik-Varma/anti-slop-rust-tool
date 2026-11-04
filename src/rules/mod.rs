@@ -156,6 +156,27 @@ static RULES: &[Rule] = &[
         ],
     },
     Rule {
+        id: "overwritten-assignment",
+        category: Category::Maintainability,
+        severity: Severity::Note,
+        summary: "A place assigned and then written again before anything reads it (`x.f = a; x.f = b;`, or a field set and the whole value then replaced)",
+        harm: "The first write has no effect, and it reads as if it does: a reader takes it for a guarantee \
+               that the code enforces, so the real place that enforces it goes unnoticed, and a change that \
+               removes the later write silently reintroduces the value. If the first right-hand side has side \
+               effects, the call is what matters and the assignment around it is not.",
+        false_positives: "Syntax only, within one block: any statement in between that mentions the place's \
+               root, or that can leave the block, ends the search, so it misses a write that a later call \
+               overwrites (the case that motivated it) and reports only the adjacent, certain ones. Aliasing \
+               through raw pointers or interior mutability is not tracked.",
+        evidence: Evidence::Consensus,
+        precision: "not yet audited",
+        exceptions: "",
+        sources: &[
+            "CWE-563, Assignment to Variable without Use: https://cwe.mitre.org/data/definitions/563.html",
+            "rustc unused_assignments (locals only): https://doc.rust-lang.org/rustc/lints/listing/warn-by-default.html#unused-assignments",
+        ],
+    },
+    Rule {
         id: "dbg-macro",
         category: Category::Correctness,
         severity: Severity::Note,

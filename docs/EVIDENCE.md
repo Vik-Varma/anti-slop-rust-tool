@@ -45,6 +45,7 @@ the pattern at all.
 | `len-truncating-cast` | `len() as u32` wraps silently | a real 4 GiB + 1 `Vec`: `len() as u32 == 1` | 0/20 shown reachable | **note** |
 | `unwrap` | unwrap panics without context | as above | 2/20 can fail at run time | **note** |
 | `dbg-macro` | `dbg!` leaks to stderr in release | (behaviour documented in std) | 1/10 accidental | **note** |
+| `overwritten-assignment` | A write that is overwritten before any read is dead, and reads as a guarantee it doesn't provide (CWE-563; rustc warns for locals only) | none: the harm is misleading code, not a failure to reproduce | 0 instances in 38 codebases (the 200 adjacent same-target assignments by text search are builder chains whose right-hand side reads the place, which the check skips). Catches the adjacent form only, so it would **not** have caught the SteelMC `data.motion = [0.0; 3]` case, where a later call overwrote it | **note** (consensus) |
 | `unsafe-without-comment` | unsafe needs a written justification | none possible: it is the rule for rustc's and std's own code (std-dev guide) and a Clippy restriction lint (`undocumented_unsafe_blocks`) | 20/20 lacked one; none shown unsound. Study: OR 1.18 [0.75, 1.87] discovery, 1.92 [1.11, 3.35] replication, neither significant after Holm correction | **note** (consensus) |
 
 ## Claims that failed

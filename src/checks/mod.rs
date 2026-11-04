@@ -7,6 +7,7 @@ mod errors;
 mod hygiene;
 mod numeric;
 mod panics;
+mod redundancy;
 pub mod style;
 pub(crate) mod unsafety;
 
@@ -75,6 +76,10 @@ pub fn stmt(a: &mut Analyzer, node: &syn::Stmt) {
 pub fn macro_call(a: &mut Analyzer, node: &syn::Macro) {
     panics::macro_call(a, node);
     style::macro_call(a, node);
+}
+
+pub fn block(a: &mut Analyzer, node: &syn::Block) {
+    redundancy::block(a, node);
 }
 
 pub fn item_use(a: &mut Analyzer, node: &syn::ItemUse) {

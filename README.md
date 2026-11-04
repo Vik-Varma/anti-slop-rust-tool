@@ -86,6 +86,7 @@ verdicts:
 | `unsafe-without-comment` | `unsafe` with no justifying comment | consensus, not measured |
 | `len-truncating-cast` | `.len() as u32` and narrower | 0/20 reachable |
 | `dbg-macro` | `dbg!` in shipping code | 1/10 accidental |
+| `overwritten-assignment` | a place assigned, then written again (or replaced whole) before anything reads it, in one block | 0 instances in 38 codebases; exact but rare |
 
 Tests, examples, benches, build scripts, `#[cfg(test)]` modules (including those in their own
 files), test-support crates and `xtask` crates aren't judged as shipping code.

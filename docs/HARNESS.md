@@ -58,6 +58,13 @@ Two details come straight from the record. Sizes are code lines, not raw lines, 
 told to shrink a file will delete the comments; and a `Cargo.toml` edit is a measuring-stick change
 only when it touches a profile or lint level, because dependency bumps are ordinary work.
 
+The `size` item (a changed file over 1,000 code lines) rests on review practice, not defect
+data: Ferrock's `AGENTS.md` and Woolf's agentic-iteration rules both use it, and Google's guidance
+calls a 1,000-line change "usually too large". The defect evidence points the other way (file
+size has no link to later fixes; `study/crate-size.md`), so it is report-only by default and
+stays out of the blocking set. Crate size has no guard at all, for the same reason
+([research/crate-size.md](research/crate-size.md)).
+
 The report's reported-only items are the handoff: the list of what a person must look at before
 merging agent work, which is what the agent reaches for when a check is in its way. A `handoff`
 note written by the agent should cite the report rather than restate it; the hook saves each

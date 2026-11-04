@@ -157,6 +157,7 @@ preferences, which `docs/STYLE.md` covers.
 | `mem-forget` | Leaks verified: a forgotten guard holds its lock forever and forgotten files keep their descriptors. But 10/10 audit uses were deliberate ownership hand-offs in expert code. |
 | `unimplemented!()` as unfinished code | The std docs distinguish it from `todo!()`: it makes no claim the code will be written. In the audit it was used that way (unsupported features, mocks). antislop flags it as critical; this tool doesn't. |
 | Complexity, length, nesting, parameter rules | The defect study, above. `anti-slop metrics` still reports the numbers. |
+| A maximum crate size, or file size, as a defect guard | Crate size has no detectable effect on later fixes beyond function size, churn and repository (odds ratio 0.95 per doubling as published, 0.98 corrected; file size 1.02 to 1.03; `study/crate-size.md`). The literature agrees: no optimal size, no threshold effect (El Emam 2002), and the biggest files had the lowest defect density in the one threshold test (Yamashita 2016). Build-time costs are real but follow the dependency graph's shape, not line counts ([research/crate-size.md](research/crate-size.md)). |
 
 ## Threats to validity
 
@@ -207,7 +208,7 @@ preferences, which `docs/STYLE.md` covers.
 Every web page cited by a rule or in these docs was fetched on 2026-10-26 (2026-10-27 for Google's
 guide, the Cargo Book and the `catch_unwind` and `Mutex` pages), and the claim it is cited for was
 found in its text. `study/check_sources.py` repeats the check (a regex per claim)
-and exits non-zero if any claim has gone missing: 54 claims on 29 pages plus the six Clippy lint groups,
+and exits non-zero if any claim has gone missing: 59 claims on 33 pages plus the six Clippy lint groups,
 none missing. Two corrections came out of that check. The Book's "in production-quality code,
 most Rustaceans choose `expect` rather than `unwrap`" is in chapter 9.2, not 9.3. And Rust 2024
 makes `static_mut_refs` *deny by default*, a lint that can be allowed, not a hard error.

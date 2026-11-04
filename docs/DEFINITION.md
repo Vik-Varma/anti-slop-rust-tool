@@ -75,6 +75,11 @@ numbers for each:
 - **`unimplemented!()`**: unlike `todo!()`, which "conveys an intent of implementing the
   functionality later", the standard library says it "makes no such claims", and the audit found
   it marking unsupported features and mocks.
+- **Big crates and big files.** Crate size shows no link to later bug fixes once function size,
+  churn and repository are controlled, and the literature finds no optimal or threshold size.
+  Build-time cost is a real reason to look at a crate, but it depends on the dependency graph's
+  shape, which `cargo build --timings` shows and a line count doesn't
+  ([research/crate-size.md](research/crate-size.md)).
 - **`mem::forget`**: it can leak, but in the audit every use was a deliberate hand-off of
   ownership.
 

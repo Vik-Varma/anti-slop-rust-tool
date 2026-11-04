@@ -198,5 +198,8 @@ harness is being gamed, and the log will show it.
   staged file is judged as it is on disk.
 - A local function named `catch_unwind`, or a `use` of a module whose last segment looks like a
   function, is taken at face value, as the rules' own entries say.
+- It can't see a redundant write that a later call overwrites; rustc and Clippy can't either, and
+  `cargo mutants` doesn't delete assignments. [research/redundant-code.md](research/redundant-code.md)
+  sets out what could.
 - Nothing here measures whether the loop helps. The log is the instrument; the measurement is
   still to be done.
